@@ -36,7 +36,7 @@ def get_ai_analysis(asins):
     try:
         api = keepa.Keepa(KEEPA_API_KEY)
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-1.0-pro')
     except Exception as e:
         st.error(f"Failed to configure APIs. Please check your keys. Error: {e}")
         return None
@@ -260,7 +260,7 @@ with tab2:
                 full_response = ""
                 
                 try:
-                    chat_model = genai.GenerativeModel('gemini-pro')
+                    chat_model = genai.GenerativeModel('gemini-1.0-pro')
                     
                     # Limit the history and map roles for the API
                     max_history = 10
