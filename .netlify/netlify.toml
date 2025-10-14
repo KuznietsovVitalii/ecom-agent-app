@@ -1,0 +1,30 @@
+functionsDirectory = "C:\\Users\\User\\ecom_agent_app\\netlify\\functions"
+functionsDirectoryOrigin = "config"
+plugins = []
+headers = []
+redirects = []
+
+[build]
+publish = "C:\\Users\\User\\ecom_agent_app\\frontend\\dist"
+publishOrigin = "config"
+commandOrigin = "config"
+command = "cd frontend && npm run build"
+functions = "C:\\Users\\User\\ecom_agent_app\\netlify\\functions"
+
+[build.environment]
+
+[build.processing]
+
+[build.processing.css]
+
+[build.processing.html]
+
+[build.processing.images]
+
+[build.processing.js]
+
+[build.services]
+
+[functions]
+
+[functions."*"]
