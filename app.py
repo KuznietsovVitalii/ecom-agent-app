@@ -224,26 +224,28 @@ with tab2:
 
         # Display assistant response in chat message container
         with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            full_response = ""
-            
-            # Create a new model instance for chat
-            try:
-                chat_model = genai.GenerativeModel('gemini-1.5-flash')
-                # Prepare history for the model
-                model_history = [{"role": msg["role"], "parts": [msg["content"]]} for msg in st.session_state.messages]
+            with st.spinner("Agent is thinking..."):
+                message_placeholder = st.empty()
+                full_response = ""
                 
-                # The last message is the user's prompt, which we send separately
-                # So, we remove it from the history for the 'start_chat' call
-                chat = chat_model.start_chat(history=model_history[:-1])
-                response = chat.send_message(model_history[-1]["parts"], stream=True)
+                try:
+                    chat_model = genai.GenerativeModel('gemini-1.5-flash')
+                    model_history = [{"role": msg["role"], "parts": [msg["content"]]} for msg in st.session_state.messages]
+                    
+                    chat = chat_model.start_chat(history=model_history[:-1])
+                    response = chat.send_message(model_history[-1]["parts"], stream=True)
 
-                for chunk in response:
-                    full_response += (chunk.text or "")
-                    message_placeholder.markdown(full_response + "▌")
-                message_placeholder.markdown(full_response)
-            except Exception as e:
-                full_response = f"An error occurred: {e}"
-                message_placeholder.markdown(full_response)
+                    for chunk in response:
+                        full_response += (chunk.text or "")
+                        message_placeholder.markdown(full_response + "▌")
+                    
+                    if not full_response.strip():
+                        full_response = "I'm sorry, I don't have a response for that."
+
+                    message_placeholder.markdown(full_response)
+
+                except Exception as e:
+                    full_response = f"An error occurred: {e}"
+                    message_placeholder.markdown(full_response)
 
         st.session_state.messages.append({"role": "assistant", "content": full_response})
