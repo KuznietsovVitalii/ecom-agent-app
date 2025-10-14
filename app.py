@@ -164,35 +164,7 @@ def get_ai_analysis(asins):
     else:
         return raw_df
 
-def get_ai_suggested_columns(description, available_columns):
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-2.5-flash') # Use the correct model name
-
-        prompt = f"""
-        You are an expert in e-commerce data analysis.
-        A user wants to select columns from a dataset.
-        They have provided a description of the columns they are interested in.
-        You also have a list of all available column names.
-        Your task is to suggest the most relevant column names from the available list that match the user's description.
-        Return your suggestions as a JSON array of strings. Only include column names that are present in the available_columns list.
-
-        User description: "{description}"
-        Available columns: {json.dumps(available_columns)}
-
-        Example of desired output format:
-        ["ASIN", "Current Price"]
-        """
-        response = model.generate_content(prompt)
-        cleaned_response = response.text.strip().replace('```json', '').replace('```', '')
-        suggested_columns = json.loads(cleaned_response)
-        
-        # Filter out any suggestions that are not actually in available_columns
-        filtered_suggestions = [col for col in suggested_columns if col in available_columns]
-        return filtered_suggestions
-    except Exception as e:
-        st.error(f"Error getting AI column suggestions: {e}")
-        return []
+ 
 
 # --- Streamlit UI ---
 st.info("This is a multi-functional e-commerce agent.")
@@ -226,33 +198,14 @@ with tab1:
             except Exception as e:
                 st.error(f"Error reading CSV: {e}")
 
-    # New AI-assisted column selection
-    st.subheader("3. AI-Assisted Column Selection (Optional)")
-    column_description = st.text_input("Describe the columns you want to see (e.g., 'price and rank'):")
-    suggest_columns_button = st.button("Suggest Columns")
-
     all_possible_columns = ["ASIN", "Title", "90-Day Avg. Rank", "Current Price", "analysis"]
     if original_df is not None:
         all_possible_columns.extend([col for col in original_df.columns if col not in all_possible_columns])
     
-    # Logic for AI suggestions
-    if suggest_columns_button and column_description:
-        with st.spinner("AI is suggesting columns..."):
-            suggested_cols = get_ai_suggested_columns(column_description, all_possible_columns)
-            if suggested_cols:
-                st.session_state.suggested_columns_for_multiselect = suggested_cols
-            else:
-                st.warning("AI could not suggest any columns based on your description.")
-    
-    # Use st.session_state for default value
-    default_selected_cols = [col for col in all_possible_columns if col in ["ASIN", "Title", "90-Day Avg. Rank", "Current Price", "analysis"]]
-    if "suggested_columns_for_multiselect" in st.session_state and st.session_state.suggested_columns_for_multiselect:
-        default_selected_cols = st.session_state.suggested_columns_for_multiselect
-
     selected_columns = st.multiselect(
         "Select columns to display:",
         options=all_possible_columns,
-        default=default_selected_cols
+        default=[col for col in all_possible_columns if col in ["ASIN", "Title", "90-Day Avg. Rank", "Current Price", "analysis"]]
     )
 
     analyze_button = st.button("Analyze")
