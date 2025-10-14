@@ -57,9 +57,7 @@ def get_ai_analysis(asins):
     # 3. Format Keepa data for the AI and for the raw data table
     product_data_for_ai = []
     raw_data_for_table = []
-    st.error(f"Debugging: Type of products list: {type(products)}, Content: {products}") # Debugging line
     for product in products:
-        st.error(f"Debugging: Type of product: {type(product)}, Content: {product}") # Debugging line
         try:
             asin = product.get('asin', 'N/A')
             title = product.get('title', 'N/A')
@@ -70,9 +68,11 @@ def get_ai_analysis(asins):
             
             avg_rank = 'N/A'
             if avg_list and isinstance(avg_list, list) and len(avg_list) > 0:
-                avg_dict = avg_list[0]
-                if isinstance(avg_dict, dict):
-                    avg_rank = avg_dict.get('90', 'N/A')
+                first_avg_element = avg_list[0]
+                if isinstance(first_avg_element, dict): # If it's a dictionary, get '90'
+                    avg_rank = first_avg_element.get('90', 'N/A')
+                elif isinstance(first_avg_element, (int, float)): # If it's a number, use it directly
+                    avg_rank = first_avg_element
 
             # Defensively access nested data for current_price
             current_price_list = product.get('data', {}).get('NEW', [])
