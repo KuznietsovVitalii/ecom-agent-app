@@ -56,38 +56,45 @@ def get_ai_analysis(asins):
     product_data_for_ai = []
     raw_data_for_table = []
     for product in products:
-        asin = product.get('asin', 'N/A')
-        title = product.get('title', 'N/A')
+        try:
+            asin = product.get('asin', 'N/A')
+            title = product.get('title', 'N/A')
 
-        # Defensively access nested data
-        stats = product.get('stats', {})
-        avg_list = stats.get('avg', [])
-        
-        avg_rank = 'N/A'
-        if avg_list and isinstance(avg_list, list) and len(avg_list) > 0:
-            avg_dict = avg_list[0]
-            if isinstance(avg_dict, dict):
-                avg_rank = avg_dict.get('90', 'N/A')
+            # Defensively access nested data
+            stats = product.get('stats', {})
+            avg_list = stats.get('avg', [])
+            
+            avg_rank = 'N/A'
+            if avg_list and isinstance(avg_list, list) and len(avg_list) > 0:
+                avg_dict = avg_list[0]
+                if isinstance(avg_dict, dict):
+                    avg_rank = avg_dict.get('90', 'N/A')
 
-        current_price_list = product.get('data', {}).get('NEW', [])
-        current_price = 'N/A'
-        if current_price_list and isinstance(current_price_list, list) and len(current_price_list) > 0:
-            price_value = current_price_list[-1]
-            if isinstance(price_value, (int, float)):
-                current_price = price_value / 100.0
-        
-        product_data_for_ai.append({
-            "asin": asin,
-            "title": title,
-            "90_day_avg_sales_rank": avg_rank,
-            "current_new_price": current_price
-        })
-        raw_data_for_table.append({
-            "ASIN": asin,
-            "Title": title,
-            "90-Day Avg. Rank": avg_rank,
-            "Current Price": current_price
-        })
+            current_price_list = product.get('data', {}).get('NEW', [])
+            current_price = 'N/A'
+            if current_price_list and isinstance(current_price_list, list) and len(current_price_list) > 0:
+                price_value = current_price_list[-1]
+                if isinstance(price_value, (int, float)):
+                    current_price = price_value / 100.0
+            
+            product_data_for_ai.append({
+                "asin": asin,
+                "title": title,
+                "90_day_avg_sales_rank": avg_rank,
+                "current_new_price": current_price
+            })
+            raw_data_for_table.append({
+                "ASIN": asin,
+                "Title": title,
+                "90-Day Avg. Rank": avg_rank,
+                "Current Price": current_price
+            })
+        except Exception as e:
+            st.error(f"Error processing product: {product.get('asin', 'Unknown ASIN')}")
+            st.error(f"Error: {e}")
+            st.json(product) # Log the entire product data that caused the error
+            # Continue to the next product
+            continue
     
     raw_df = pd.DataFrame(raw_data_for_table)
 
