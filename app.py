@@ -58,9 +58,24 @@ def get_ai_analysis(asins):
     for product in products:
         asin = product.get('asin', 'N/A')
         title = product.get('title', 'N/A')
-        avg_rank = product.get('stats', {}).get('avg', [{}])[0].get('90', 'N/A')
-        current_price = product.get('data', {}).get('NEW', [-1])[-1] / 100.0 if product.get('data', {}).get('NEW') else 'N/A'
 
+        # Defensively access nested data
+        stats = product.get('stats', {})
+        avg_list = stats.get('avg', [])
+        
+        avg_rank = 'N/A'
+        if avg_list and isinstance(avg_list, list) and len(avg_list) > 0:
+            avg_dict = avg_list[0]
+            if isinstance(avg_dict, dict):
+                avg_rank = avg_dict.get('90', 'N/A')
+
+        current_price_list = product.get('data', {}).get('NEW', [])
+        current_price = 'N/A'
+        if current_price_list and isinstance(current_price_list, list) and len(current_price_list) > 0:
+            price_value = current_price_list[-1]
+            if isinstance(price_value, (int, float)):
+                current_price = price_value / 100.0
+        
         product_data_for_ai.append({
             "asin": asin,
             "title": title,
