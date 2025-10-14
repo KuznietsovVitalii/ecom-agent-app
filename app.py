@@ -76,12 +76,6 @@ def get_ai_analysis(asins):
             st.json(product) # Log the entire product data that caused the error
             # Continue to the next product
             continue
-        except Exception as e:
-            st.error(f"Error processing product: {product.get('asin', 'Unknown ASIN')}")
-            st.error(f"Error: {e}")
-            st.json(product) # Log the entire product data that caused the error
-            # Continue to the next product
-            continue
     
     raw_df = pd.DataFrame(raw_data_for_table)
 
@@ -133,54 +127,7 @@ def get_ai_analysis(asins):
     else:
         return raw_df
 
-def estimate_sales_quantity(sales_rank_history):
-    # sales_rank_history is a list of [timestamp, sales_rank]
-    if not sales_rank_history:
-        return 'N/A', 'N/A', 'N/A'
-
-    # Extract only the sales rank values
-    ranks = [item[1] for item in sales_rank_history if item[1] != -1] # -1 means no rank
-
-    if not ranks:
-        return 'N/A', 'N/A', 'N/A'
-
-    # Prompt the AI to estimate sales quantity from sales ranks
-    prompt = f"""
-    You are an expert e-commerce analyst.
-    You are given a list of historical sales ranks for a product.
-    Sales rank is inversely proportional to sales quantity (lower rank means higher sales).
-    Estimate the average, maximum, and minimum sales quantity for this product based on the provided sales ranks.
-    Provide your estimation as a JSON object with keys "average_sales_quantity", "max_sales_quantity", and "min_sales_quantity".
-    Use a reasonable heuristic for estimation. For example, a sales rank of 1 might mean very high sales, while a rank of 1,000,000 might mean very low sales.
-    The sales quantity should be a positive integer.
-
-    Sales Ranks: {ranks}
-
-    Example of desired output format:
-    {{
-      "average_sales_quantity": 100,
-      "max_sales_quantity": 200,
-      "min_sales_quantity": 50
-    }}
-    """
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
-        cleaned_response = response.text.strip().replace('```json', '').replace('```', '')
-        estimation = json.loads(cleaned_response)
-        
-        avg_sales = estimation.get('average_sales_quantity', 'N/A')
-        max_sales = estimation.get('max_sales_quantity', 'N/A')
-        min_sales = estimation.get('min_sales_quantity', 'N/A')
-        
-        return avg_sales, max_sales, min_sales
-    except Exception as e:
-        st.error(f"Error estimating sales quantity: {e}")
-        return 'N/A', 'N/A', 'N/A'
-
-# --- Streamlit UI ---
-st.info("This is a multi-functional e-commerce agent.")
+ 
 
 tab1, tab2 = st.tabs(["ASIN Analysis", "Chat with Agent"])
 
@@ -220,13 +167,6 @@ with tab1:
         "Title",
         "90-Day Avg. Rank",
         "Current Price",
-        "Color",
-        "Size",
-        "Max Sales Rank",
-        "Min Sales Rank",
-        "Estimated Avg Sales Qty",
-        "Estimated Max Sales Qty",
-        "Estimated Min Sales Qty",
         "analysis"
     ]
     if original_df is not None:
