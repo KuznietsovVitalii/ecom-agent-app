@@ -59,89 +59,23 @@ def get_ai_analysis(asins):
     raw_data_for_table = []
     for product in products:
         try:
+            st.error(f"Debugging: Type of product inside try: {type(product)}, Content: {product}") # Debugging line
+            
             asin = product.get('asin', 'N/A')
-            title = product.get('title', 'N/A')
-
-            # Defensively access nested data for avg_rank
             stats = product.get('stats', {})
-            avg_list = stats.get('avg', [])
             
-            avg_rank = 'N/A'
-            if avg_list and isinstance(avg_list, list) and len(avg_list) > 0:
-                first_avg_element = avg_list[0]
-                if isinstance(first_avg_element, dict): # If it's a dictionary, get '90'
-                    avg_rank = first_avg_element.get('90', 'N/A')
-                elif isinstance(first_avg_element, (int, float)): # If it's a number, use it directly
-                    avg_rank = first_avg_element
+            st.error(f"Debugging: ASIN: {asin}, Type of stats: {type(stats)}, Content of stats: {stats}")
 
-            # Defensively access nested data for current_price
-            current_price_list = product.get('data', {}).get('NEW', [])
-            current_price = 'N/A'
-            
-            price_list_has_data = False
-            if isinstance(current_price_list, list) and len(current_price_list) > 0:
-                price_list_has_data = True
-            elif hasattr(current_price_list, 'size') and current_price_list.size > 0:
-                price_list_has_data = True
+            # Temporarily append minimal data to avoid further errors
+            product_data_for_ai.append({"asin": asin})
+            raw_data_for_table.append({"ASIN": asin})
 
-            if price_list_has_data:
-                price_value = current_price_list[-1]
-                # Check if price_value is a valid number (not nan)
-                if isinstance(price_value, (int, float)) and price_value == price_value:
-                    current_price = price_value # It's already in dollars/euros
-            
-            color = product.get('color', 'N/A')
-            size = product.get('size', 'N/A')
-
-            # Extract max and min sales rank
-            max_sales_rank = 'N/A'
-            if 'max' in stats and 'SALES' in stats['max']:
-                sales_max_data = stats['max']['SALES']
-                if isinstance(sales_max_data, list) and len(sales_max_data) > 1:
-                    max_sales_rank = sales_max_data[1]
-                else:
-                    max_sales_rank = sales_max_data # If it's not a list, take it as is
-
-            min_sales_rank = 'N/A'
-            if 'min' in stats and 'SALES' in stats['min']:
-                sales_min_data = stats['min']['SALES']
-                if isinstance(sales_min_data, list) and len(sales_min_data) > 1:
-                    min_sales_rank = sales_min_data[1]
-                else:
-                    min_sales_rank = sales_min_data # If it's not a list, take it as is
-
-            # Extract sales rank history
-            sales_rank_history = product.get('csv', {}).get(3, []) # csv[3] is sales rank history
-
-            # Estimate sales quantity
-            avg_sales_qty, max_sales_qty, min_sales_qty = estimate_sales_quantity(sales_rank_history)
-
-            product_data_for_ai.append({
-                "asin": asin,
-                "title": title,
-                "90_day_avg_sales_rank": avg_rank,
-                "current_new_price": current_price,
-                "color": color,
-                "size": size,
-                "max_sales_rank": max_sales_rank,
-                "min_sales_rank": min_sales_rank,
-                "estimated_avg_sales_qty": avg_sales_qty,
-                "estimated_max_sales_qty": max_sales_qty,
-                "estimated_min_sales_qty": min_sales_qty
-            })
-            raw_data_for_table.append({
-                "ASIN": asin,
-                "Title": title,
-                "90-Day Avg. Rank": avg_rank,
-                "Current Price": current_price,
-                "Color": color,
-                "Size": size,
-                "Max Sales Rank": max_sales_rank,
-                "Min Sales Rank": min_sales_rank,
-                "Estimated Avg Sales Qty": avg_sales_qty,
-                "Estimated Max Sales Qty": max_sales_qty,
-                "Estimated Min Sales Qty": min_sales_qty
-            })
+        except Exception as e:
+            st.error(f"Error processing product: {product.get('asin', 'Unknown ASIN')}")
+            st.error(f"Error: {e}")
+            st.json(product) # Log the entire product data that caused the error
+            # Continue to the next product
+            continue
         except Exception as e:
             st.error(f"Error processing product: {product.get('asin', 'Unknown ASIN')}")
             st.error(f"Error: {e}")
