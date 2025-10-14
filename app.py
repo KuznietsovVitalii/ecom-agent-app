@@ -219,7 +219,17 @@ with tab1:
             except Exception as e:
                 st.error(f"Error reading CSV: {e}")
 
-    all_possible_columns = ["ASIN", "Title", "90-Day Avg. Rank", "Current Price", "analysis"]
+    all_possible_columns = [
+        "ASIN",
+        "Title",
+        "90-Day Avg. Rank",
+        "Current Price",
+        "Color",
+        "Size",
+        "Max Sales Rank",
+        "Min Sales Rank",
+        "analysis"
+    ]
     if original_df is not None:
         all_possible_columns.extend([col for col in original_df.columns if col not in all_possible_columns])
     
