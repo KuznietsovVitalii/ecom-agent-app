@@ -231,10 +231,14 @@ with tab2:
                 try:
                     chat_model = genai.GenerativeModel('gemini-1.5-flash')
                     
-                    # Limit the history to the last 10 messages to improve performance
+                    # Limit the history and map roles for the API
                     max_history = 10
                     history_to_send = st.session_state.messages[-max_history:]
-                    model_history = [{"role": msg["role"], "parts": [msg["content"]]} for msg in history_to_send]
+                    
+                    model_history = []
+                    for msg in history_to_send:
+                        role = "model" if msg["role"] == "assistant" else "user"
+                        model_history.append({"role": role, "parts": [msg["content"]]})
 
                     # Use generate_content with the history
                     response = chat_model.generate_content(model_history, stream=True)
