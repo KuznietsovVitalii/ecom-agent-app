@@ -108,6 +108,12 @@ def get_ai_analysis(asins):
                 else:
                     min_sales_rank = sales_min_data # If it's not a list, take it as is
 
+            # Extract sales rank history
+            sales_rank_history = product.get('csv', {}).get(3, []) # csv[3] is sales rank history
+
+            # Estimate sales quantity
+            avg_sales_qty, max_sales_qty, min_sales_qty = estimate_sales_quantity(sales_rank_history)
+
             product_data_for_ai.append({
                 "asin": asin,
                 "title": title,
@@ -116,7 +122,10 @@ def get_ai_analysis(asins):
                 "color": color,
                 "size": size,
                 "max_sales_rank": max_sales_rank,
-                "min_sales_rank": min_sales_rank
+                "min_sales_rank": min_sales_rank,
+                "estimated_avg_sales_qty": avg_sales_qty,
+                "estimated_max_sales_qty": max_sales_qty,
+                "estimated_min_sales_qty": min_sales_qty
             })
             raw_data_for_table.append({
                 "ASIN": asin,
@@ -126,7 +135,10 @@ def get_ai_analysis(asins):
                 "Color": color,
                 "Size": size,
                 "Max Sales Rank": max_sales_rank,
-                "Min Sales Rank": min_sales_rank
+                "Min Sales Rank": min_sales_rank,
+                "Estimated Avg Sales Qty": avg_sales_qty,
+                "Estimated Max Sales Qty": max_sales_qty,
+                "Estimated Min Sales Qty": min_sales_qty
             })
         except Exception as e:
             st.error(f"Error processing product: {product.get('asin', 'Unknown ASIN')}")
@@ -185,7 +197,51 @@ def get_ai_analysis(asins):
     else:
         return raw_df
 
- 
+def estimate_sales_quantity(sales_rank_history):
+    # sales_rank_history is a list of [timestamp, sales_rank]
+    if not sales_rank_history:
+        return 'N/A', 'N/A', 'N/A'
+
+    # Extract only the sales rank values
+    ranks = [item[1] for item in sales_rank_history if item[1] != -1] # -1 means no rank
+
+    if not ranks:
+        return 'N/A', 'N/A', 'N/A'
+
+    # Prompt the AI to estimate sales quantity from sales ranks
+    prompt = f"""
+    You are an expert e-commerce analyst.
+    You are given a list of historical sales ranks for a product.
+    Sales rank is inversely proportional to sales quantity (lower rank means higher sales).
+    Estimate the average, maximum, and minimum sales quantity for this product based on the provided sales ranks.
+    Provide your estimation as a JSON object with keys "average_sales_quantity", "max_sales_quantity", and "min_sales_quantity".
+    Use a reasonable heuristic for estimation. For example, a sales rank of 1 might mean very high sales, while a rank of 1,000,000 might mean very low sales.
+    The sales quantity should be a positive integer.
+
+    Sales Ranks: {ranks}
+
+    Example of desired output format:
+    {{
+      "average_sales_quantity": 100,
+      "max_sales_quantity": 200,
+      "min_sales_quantity": 50
+    }}
+    """
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(prompt)
+        cleaned_response = response.text.strip().replace('```json', '').replace('```', '')
+        estimation = json.loads(cleaned_response)
+        
+        avg_sales = estimation.get('average_sales_quantity', 'N/A')
+        max_sales = estimation.get('max_sales_quantity', 'N/A')
+        min_sales = estimation.get('min_sales_quantity', 'N/A')
+        
+        return avg_sales, max_sales, min_sales
+    except Exception as e:
+        st.error(f"Error estimating sales quantity: {e}")
+        return 'N/A', 'N/A', 'N/A'
 
 # --- Streamlit UI ---
 st.info("This is a multi-functional e-commerce agent.")
@@ -232,6 +288,9 @@ with tab1:
         "Size",
         "Max Sales Rank",
         "Min Sales Rank",
+        "Estimated Avg Sales Qty",
+        "Estimated Max Sales Qty",
+        "Estimated Min Sales Qty",
         "analysis"
     ]
     if original_df is not None:
