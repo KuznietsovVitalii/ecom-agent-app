@@ -36,7 +36,7 @@ def get_ai_analysis(asins):
     try:
         api = keepa.Keepa(KEEPA_API_KEY)
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-pro')
     except Exception as e:
         st.error(f"Failed to configure APIs. Please check your keys. Error: {e}")
         return None
@@ -60,7 +60,7 @@ def get_ai_analysis(asins):
             asin = product.get('asin', 'N/A')
             title = product.get('title', 'N/A')
 
-            # Defensively access nested data
+            # Defensively access nested data for avg_rank
             stats = product.get('stats', {})
             avg_list = stats.get('avg', [])
             
@@ -70,12 +70,21 @@ def get_ai_analysis(asins):
                 if isinstance(avg_dict, dict):
                     avg_rank = avg_dict.get('90', 'N/A')
 
+            # Defensively access nested data for current_price
             current_price_list = product.get('data', {}).get('NEW', [])
             current_price = 'N/A'
-            if current_price_list and isinstance(current_price_list, list) and len(current_price_list) > 0:
+            
+            price_list_has_data = False
+            if isinstance(current_price_list, list) and len(current_price_list) > 0:
+                price_list_has_data = True
+            elif hasattr(current_price_list, 'size') and current_price_list.size > 0:
+                price_list_has_data = True
+
+            if price_list_has_data:
                 price_value = current_price_list[-1]
-                if isinstance(price_value, (int, float)):
-                    current_price = price_value / 100.0
+                # Check if price_value is a valid number (not nan)
+                if isinstance(price_value, (int, float)) and price_value == price_value:
+                    current_price = price_value # It's already in dollars/euros
             
             product_data_for_ai.append({
                 "asin": asin,
@@ -251,7 +260,7 @@ with tab2:
                 full_response = ""
                 
                 try:
-                    chat_model = genai.GenerativeModel('gemini-1.5-flash')
+                    chat_model = genai.GenerativeModel('gemini-pro')
                     
                     # Limit the history and map roles for the API
                     max_history = 10
