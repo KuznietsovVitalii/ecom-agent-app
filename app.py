@@ -219,6 +219,10 @@ with tab1:
             except Exception as e:
                 st.error(f"Error reading CSV: {e}")
 
+    # ... (input method selection)
+
+    extract_variations_checkbox = st.checkbox("Extract all product variations (may increase processing time and API calls)")
+
     all_possible_columns = [
         "ASIN",
         "Title",
@@ -248,6 +252,32 @@ with tab1:
             st.warning("Please provide ASINs to analyze.")
         else:
             st.write(f"Found {len(asins)} ASINs to analyze.")
+
+            # New logic for extracting variations
+            if extract_variations_checkbox:
+                st.info("Extracting product variations...")
+                expanded_asins = []
+                # Initialize Keepa API here, outside the loop for efficiency
+                try:
+                    temp_api = keepa.Keepa(KEEPA_API_KEY)
+                except Exception as e:
+                    st.error(f"Failed to configure Keepa API for variation extraction. Error: {e}")
+                    st.stop() # Stop execution if API fails
+
+                for asin_item in asins:
+                    expanded_asins.append(asin_item) # Add original ASIN
+                    try:
+                        # Query for single ASIN to get variations
+                        product_data = temp_api.query([asin_item])
+                        if product_data and product_data[0].get('variations'):
+                            # Variations are a list of ASINs
+                            for variation_asin in product_data[0]['variations']:
+                                expanded_asins.append(variation_asin)
+                    except Exception as e:
+                        st.warning(f"Could not retrieve variations for ASIN {asin_item}: {e}")
+                asins = list(set(expanded_asins)) # Remove duplicates and update asins list
+                st.write(f"Analyzing {len(asins)} unique ASINs (including variations if selected).")
+
             with st.spinner('Fetching data from Keepa and analyzing with AI...'):
                 result_df = get_ai_analysis(asins)
 
