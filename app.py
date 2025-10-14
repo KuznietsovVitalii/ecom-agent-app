@@ -270,12 +270,14 @@ with tab1:
                         # Query for single ASIN to get variations
                         product_data = temp_api.query([asin_item])
                         if product_data and product_data[0].get('variations'):
-                            # Variations are a list of ASINs
-                            for variation_asin in product_data[0]['variations']:
-                                expanded_asins.append(variation_asin)
+                            # Variations are a list of dictionaries, each with an 'asin' key
+                            for variation_dict in product_data[0]['variations']:
+                                if isinstance(variation_dict, dict) and 'asin' in variation_dict:
+                                    expanded_asins.append(variation_dict['asin'])
                     except Exception as e:
                         st.warning(f"Could not retrieve variations for ASIN {asin_item}: {e}")
-                st.error(f"Expanded ASINs before set conversion: {expanded_asins}") # Debugging
+                # Remove debugging message
+                # st.error(f"Expanded ASINs before set conversion: {expanded_asins}") # Debugging
                 asins = list(set(expanded_asins)) # Remove duplicates and update asins list
                 st.write(f"Analyzing {len(asins)} unique ASINs (including variations if selected).")
 
