@@ -88,17 +88,24 @@ def get_ai_analysis(asins):
                 if isinstance(price_value, (int, float)) and price_value == price_value:
                     current_price = price_value # It's already in dollars/euros
             
+            color = product.get('color', 'N/A')
+            size = product.get('size', 'N/A')
+
             product_data_for_ai.append({
                 "asin": asin,
                 "title": title,
                 "90_day_avg_sales_rank": avg_rank,
-                "current_new_price": current_price
+                "current_new_price": current_price,
+                "color": color,
+                "size": size
             })
             raw_data_for_table.append({
                 "ASIN": asin,
                 "Title": title,
                 "90-Day Avg. Rank": avg_rank,
-                "Current Price": current_price
+                "Current Price": current_price,
+                "Color": color,
+                "Size": size
             })
         except Exception as e:
             st.error(f"Error processing product: {product.get('asin', 'Unknown ASIN')}")
