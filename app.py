@@ -275,6 +275,7 @@ with tab1:
                                 expanded_asins.append(variation_asin)
                     except Exception as e:
                         st.warning(f"Could not retrieve variations for ASIN {asin_item}: {e}")
+                st.error(f"Expanded ASINs before set conversion: {expanded_asins}") # Debugging
                 asins = list(set(expanded_asins)) # Remove duplicates and update asins list
                 st.write(f"Analyzing {len(asins)} unique ASINs (including variations if selected).")
 
