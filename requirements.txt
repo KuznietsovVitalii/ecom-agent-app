@@ -2,3 +2,4 @@ streamlit
 pandas
 keepa
 requests
+google-generativeai
