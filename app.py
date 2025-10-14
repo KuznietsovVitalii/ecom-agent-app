@@ -230,10 +230,14 @@ with tab2:
                 
                 try:
                     chat_model = genai.GenerativeModel('gemini-1.5-flash')
-                    model_history = [{"role": msg["role"], "parts": [msg["content"]]} for msg in st.session_state.messages]
                     
-                    chat = chat_model.start_chat(history=model_history[:-1])
-                    response = chat.send_message(model_history[-1]["parts"], stream=True)
+                    # Limit the history to the last 10 messages to improve performance
+                    max_history = 10
+                    history_to_send = st.session_state.messages[-max_history:]
+                    model_history = [{"role": msg["role"], "parts": [msg["content"]]} for msg in history_to_send]
+
+                    # Use generate_content with the history
+                    response = chat_model.generate_content(model_history, stream=True)
 
                     for chunk in response:
                         full_response += (chunk.text or "")
