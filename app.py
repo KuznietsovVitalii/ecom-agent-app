@@ -58,6 +58,7 @@ def get_ai_analysis(asins):
     product_data_for_ai = []
     raw_data_for_table = []
     for product in products:
+        st.error(f"Debugging: Type of product: {type(product)}, Content: {product}") # Debugging line
         try:
             asin = product.get('asin', 'N/A')
             title = product.get('title', 'N/A')
