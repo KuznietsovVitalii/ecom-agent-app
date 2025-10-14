@@ -142,6 +142,17 @@ def get_ai_analysis(asins):
                 monthly_sales = 0
             avg_monthly_sales = int(round(monthly_sales * 0.9 + monthly_sales_max * 0.1, 0))
 
+            # Extract image link
+            main_image_link = 'N/A'
+            images_csv = product.get('imagesCSV', '')
+            if images_csv:
+                image_fragments = images_csv.split(',')
+                if image_fragments:
+                    main_image_link = f"https://m.media-amazon.com/images/I/{image_fragments[0]}"
+
+            # Extract product listing link
+            product_listing_link = f"https://www.amazon.com/dp/{asin}" if asin != 'N/A' else 'N/A'
+
             product_data_for_ai.append({
                 "asin": asin,
                 "title": title,
@@ -149,7 +160,9 @@ def get_ai_analysis(asins):
                 "current_new_price": current_price,
                 "color": color,
                 "size": size,
-                "avg_monthly_sales": avg_monthly_sales
+                "avg_monthly_sales": avg_monthly_sales,
+                "main_image_link": main_image_link,
+                "product_listing_link": product_listing_link
             })
             raw_data_for_table.append({
                 "ASIN": asin,
@@ -158,7 +171,9 @@ def get_ai_analysis(asins):
                 "Current Price": current_price,
                 "Color": color,
                 "Size": size,
-                "Avg Monthly Sales": avg_monthly_sales
+                "Avg Monthly Sales": avg_monthly_sales,
+                "Main Image Link": main_image_link,
+                "Product Listing Link": product_listing_link
             })
         except Exception as e:
             st.error(f"Error processing product: {product.get('asin', 'Unknown ASIN')}")
@@ -259,7 +274,9 @@ with tab1:
         "Current Price",
         "Color",
         "Size",
-        "Avg Monthly Sales", # Add Avg Monthly Sales
+        "Avg Monthly Sales",
+        "Main Image Link",
+        "Product Listing Link",
         "analysis"
     ]
     if original_df is not None:
