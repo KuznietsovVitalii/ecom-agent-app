@@ -26,16 +26,7 @@ except FileNotFoundError:
     """)
     st.stop()
 
-# --- Temporary Model Listing for Debugging ---
-if st.sidebar.button("List Available Gemini Models"):
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        models = genai.list_models()
-        st.sidebar.write("Available Gemini Models:")
-        for model in models:
-            st.sidebar.write(f"- {model.name}")
-    except Exception as e:
-        st.sidebar.error(f"Error listing models: {e}")
+ 
 
 # --- Core Logic Function ---
 def get_ai_analysis(asins):
@@ -47,7 +38,7 @@ def get_ai_analysis(asins):
     try:
         api = keepa.Keepa(KEEPA_API_KEY)
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
     except Exception as e:
         st.error(f"Failed to configure APIs. Please check your keys. Error: {e}")
         return None
@@ -271,7 +262,7 @@ with tab2:
                 full_response = ""
                 
                 try:
-                    chat_model = genai.GenerativeModel('gemini-1.5-flash')
+                    chat_model = genai.GenerativeModel('gemini-2.5-flash')
                     
                     # Limit the history and map roles for the API
                     max_history = 10
