@@ -26,6 +26,17 @@ except FileNotFoundError:
     """)
     st.stop()
 
+# --- Temporary Model Listing for Debugging ---
+if st.sidebar.button("List Available Gemini Models"):
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        models = genai.list_models()
+        st.sidebar.write("Available Gemini Models:")
+        for model in models:
+            st.sidebar.write(f"- {model.name}")
+    except Exception as e:
+        st.sidebar.error(f"Error listing models: {e}")
+
 # --- Core Logic Function ---
 def get_ai_analysis(asins):
     """
@@ -285,6 +296,9 @@ with tab2:
 
                 except Exception as e:
                     full_response = f"An error occurred: {e}"
+                    # Check if response object exists and has text
+                    if 'response' in locals() and hasattr(response, 'text'):
+                        full_response += f"\n\nRaw API Response: {response.text}"
                     message_placeholder.markdown(full_response)
 
         st.session_state.messages.append({"role": "assistant", "content": full_response})
