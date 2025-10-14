@@ -189,6 +189,16 @@ with tab1:
             except Exception as e:
                 st.error(f"Error reading CSV: {e}")
 
+    all_possible_columns = ["ASIN", "Title", "90-Day Avg. Rank", "Current Price", "analysis"]
+    if original_df is not None:
+        all_possible_columns.extend([col for col in original_df.columns if col not in all_possible_columns])
+    
+    selected_columns = st.multiselect(
+        "Select columns to display:",
+        options=all_possible_columns,
+        default=[col for col in all_possible_columns if col in ["ASIN", "Title", "90-Day Avg. Rank", "Current Price", "analysis"]]
+    )
+
     analyze_button = st.button("Analyze")
 
     st.subheader("2. Analysis Results")
@@ -213,13 +223,16 @@ with tab1:
                     # Drop the extra 'ASIN' column from the merge if it exists
                     if 'ASIN' in merged_df.columns and asin_column != 'ASIN':
                          merged_df = merged_df.drop(columns=['ASIN'])
-                    st.dataframe(merged_df, use_container_width=True)
+                    
+                    # Filter columns for display
+                    display_df = merged_df[selected_columns] if selected_columns else merged_df
+                    st.dataframe(display_df, use_container_width=True)
 
                     @st.cache_data
                     def convert_df_to_csv(df):
                         return df.to_csv(index=False).encode('utf-8')
 
-                    csv = convert_df_to_csv(merged_df)
+                    csv = convert_df_to_csv(merged_df) # Download the full merged_df
 
                     st.download_button(
                         label="Download Analyzed Data as CSV",
@@ -230,7 +243,9 @@ with tab1:
                 else:
                     # Paste ASINs workflow
                     st.write("### Analysis Results:")
-                    st.dataframe(result_df, use_container_width=True)
+                    # Filter columns for display
+                    display_df = result_df[selected_columns] if selected_columns else result_df
+                    st.dataframe(display_df, use_container_width=True)
             else:
                 st.error("Could not retrieve any data or analysis.")
 
