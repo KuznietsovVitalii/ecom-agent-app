@@ -137,10 +137,12 @@ def get_ai_analysis(asins):
             # avg_sales_qty, max_sales_qty, min_sales_qty = estimate_sales_quantity(sales_rank_history) # Removed
 
             monthly_sales = product.get('monthlySold', -1)
-            monthly_sales_max = sales_tiers.get(monthly_sales, 0) # Use .get with default 0
-            if monthly_sales == -1:
-                monthly_sales = 0
-            avg_monthly_sales = int(round(monthly_sales * 0.9 + monthly_sales_max * 0.1, 0))
+            
+            avg_monthly_sales = 'N/A' # Default to N/A
+
+            if monthly_sales != -1: # Only calculate if monthly_sales is not -1
+                monthly_sales_max = sales_tiers.get(monthly_sales, 0) # Use .get with default 0
+                avg_monthly_sales = int(round(monthly_sales * 0.9 + monthly_sales_max * 0.1, 0))
 
             # Extract image link
             main_image_link = 'N/A'
