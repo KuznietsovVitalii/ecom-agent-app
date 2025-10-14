@@ -57,6 +57,7 @@ def get_ai_analysis(asins):
     # 3. Format Keepa data for the AI and for the raw data table
     product_data_for_ai = []
     raw_data_for_table = []
+    st.error(f"Debugging: Type of products list: {type(products)}, Content: {products}") # Debugging line
     for product in products:
         st.error(f"Debugging: Type of product: {type(product)}, Content: {product}") # Debugging line
         try:
