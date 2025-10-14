@@ -137,6 +137,7 @@ def get_ai_analysis(asins):
             # avg_sales_qty, max_sales_qty, min_sales_qty = estimate_sales_quantity(sales_rank_history) # Removed
 
             monthly_sales = product.get('monthlySold', -1)
+            st.error(f"Debugging: ASIN: {asin}, monthlySold: {monthly_sales}") # Debugging line
             
             avg_monthly_sales = 'N/A' # Default to N/A
 
