@@ -26,7 +26,38 @@ except FileNotFoundError:
     """)
     st.stop()
 
- 
+sales_tiers = {
+    -1:0,
+    0: 50,
+    50: 100,
+    100: 200,
+    200: 300,
+    300: 400,
+    400: 500,
+    500: 600,
+    600: 700,
+    700: 800,
+    800: 900,
+    900: 1000,
+    1000: 2000,
+    2000: 3000,
+    3000: 4000,
+    4000: 5000,
+    5000: 6000,
+    6000: 7000,
+    7000: 8000,
+    8000: 9000,
+    9000: 10000,
+    10000: 20000,
+    20000: 30000,
+    30000: 40000,
+    40000: 50000,
+    50000: 60000,
+    60000: 70000,
+    70000: 80000,
+    80000: 90000,
+    90000:100000,
+    100000: 150000}
 
 # --- Core Logic Function ---
 def get_ai_analysis(asins):
@@ -59,17 +90,95 @@ def get_ai_analysis(asins):
     raw_data_for_table = []
     for product in products:
         try:
-            st.error(f"Debugging: Type of product inside try: {type(product)}, Content: {product}") # Debugging line
-            
             asin = product.get('asin', 'N/A')
+            title = product.get('title', 'N/A')
+
+            # Defensively access nested data for avg_rank
             stats = product.get('stats', {})
+            avg_list = stats.get('avg', [])
             
-            st.error(f"Debugging: ASIN: {asin}, Type of stats: {type(stats)}, Content of stats: {stats}")
+            avg_rank = 'N/A'
+            if avg_list and isinstance(avg_list, list) and len(avg_list) > 0:
+                first_avg_element = avg_list[0]
+                if isinstance(first_avg_element, dict): # If it's a dictionary, get '90'
+                    avg_rank = first_avg_element.get('90', 'N/A')
+                elif isinstance(first_avg_element, (int, float)): # If it's a number, use it directly
+                    avg_rank = first_avg_element
 
-            # Temporarily append minimal data to avoid further errors
-            product_data_for_ai.append({"asin": asin})
-            raw_data_for_table.append({"ASIN": asin})
+            # Defensively access nested data for current_price
+            current_price_list = product.get('data', {}).get('NEW', [])
+            current_price = 'N/A'
+            
+            price_list_has_data = False
+            if isinstance(current_price_list, list) and len(current_price_list) > 0:
+                price_list_has_data = True
+            elif hasattr(current_price_list, 'size') and current_price_list.size > 0:
+                price_list_has_data = True
 
+            if price_list_has_data:
+                price_value = current_price_list[-1]
+                # Check if price_value is a valid number (not nan)
+                if isinstance(price_value, (int, float)) and price_value == price_value:
+                    current_price = price_value # It's already in dollars/euros
+            
+            color = product.get('color', 'N/A')
+            size = product.get('size', 'N/A')
+
+            # Extract max and min sales rank
+            max_sales_rank = 'N/A'
+            if 'max' in stats and 'SALES' in stats['max']:
+                sales_max_data = stats['max']['SALES']
+                if isinstance(sales_max_data, list) and len(sales_max_data) > 1:
+                    max_sales_rank = sales_max_data[1]
+                else:
+                    max_sales_rank = sales_max_data # If it's not a list, take it as is
+
+            min_sales_rank = 'N/A'
+            if 'min' in stats and 'SALES' in stats['min']:
+                sales_min_data = stats['min']['SALES']
+                if isinstance(sales_min_data, list) and len(sales_min_data) > 1:
+                    min_sales_rank = sales_min_data[1]
+                else:
+                    min_sales_rank = sales_min_data # If it's not a list, take it as is
+
+            # Extract sales rank history
+            sales_rank_history = product.get('csv', []) # csv is a list, not a dict
+            if isinstance(sales_rank_history, list) and len(sales_rank_history) > 3:
+                sales_rank_history = sales_rank_history[3] # csv[3] is sales rank history
+            else:
+                sales_rank_history = []
+
+            # Estimate sales quantity
+            # avg_sales_qty, max_sales_qty, min_sales_qty = estimate_sales_quantity(sales_rank_history) # Removed
+
+            monthly_sales = product.get('monthlySold', -1)
+            monthly_sales_max = sales_tiers.get(monthly_sales, 0) # Use .get with default 0
+            if monthly_sales == -1:
+                monthly_sales = 0
+            avg_monthly_sales = int(round(monthly_sales * 0.9 + monthly_sales_max * 0.1, 0))
+
+            product_data_for_ai.append({
+                "asin": asin,
+                "title": title,
+                "90_day_avg_sales_rank": avg_rank,
+                "current_new_price": current_price,
+                "color": color,
+                "size": size,
+                "max_sales_rank": max_sales_rank,
+                "min_sales_rank": min_sales_rank,
+                "avg_monthly_sales": avg_monthly_sales
+            })
+            raw_data_for_table.append({
+                "ASIN": asin,
+                "Title": title,
+                "90-Day Avg. Rank": avg_rank,
+                "Current Price": current_price,
+                "Color": color,
+                "Size": size,
+                "Max Sales Rank": max_sales_rank,
+                "Min Sales Rank": min_sales_rank,
+                "Avg Monthly Sales": avg_monthly_sales
+            })
         except Exception as e:
             st.error(f"Error processing product: {product.get('asin', 'Unknown ASIN')}")
             st.error(f"Error: {e}")
@@ -167,6 +276,11 @@ with tab1:
         "Title",
         "90-Day Avg. Rank",
         "Current Price",
+        "Color",
+        "Size",
+        "Max Sales Rank",
+        "Min Sales Rank",
+        "Avg Monthly Sales", # Add Avg Monthly Sales
         "analysis"
     ]
     if original_df is not None:
