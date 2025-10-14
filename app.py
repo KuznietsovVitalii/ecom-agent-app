@@ -91,13 +91,32 @@ def get_ai_analysis(asins):
             color = product.get('color', 'N/A')
             size = product.get('size', 'N/A')
 
+            # Extract max and min sales rank
+            max_sales_rank = 'N/A'
+            if 'max' in stats and 'SALES' in stats['max']:
+                sales_max_data = stats['max']['SALES']
+                if isinstance(sales_max_data, list) and len(sales_max_data) > 1:
+                    max_sales_rank = sales_max_data[1]
+                else:
+                    max_sales_rank = sales_max_data # If it's not a list, take it as is
+
+            min_sales_rank = 'N/A'
+            if 'min' in stats and 'SALES' in stats['min']:
+                sales_min_data = stats['min']['SALES']
+                if isinstance(sales_min_data, list) and len(sales_min_data) > 1:
+                    min_sales_rank = sales_min_data[1]
+                else:
+                    min_sales_rank = sales_min_data # If it's not a list, take it as is
+
             product_data_for_ai.append({
                 "asin": asin,
                 "title": title,
                 "90_day_avg_sales_rank": avg_rank,
                 "current_new_price": current_price,
                 "color": color,
-                "size": size
+                "size": size,
+                "max_sales_rank": max_sales_rank,
+                "min_sales_rank": min_sales_rank
             })
             raw_data_for_table.append({
                 "ASIN": asin,
@@ -105,7 +124,9 @@ def get_ai_analysis(asins):
                 "90-Day Avg. Rank": avg_rank,
                 "Current Price": current_price,
                 "Color": color,
-                "Size": size
+                "Size": size,
+                "Max Sales Rank": max_sales_rank,
+                "Min Sales Rank": min_sales_rank
             })
         except Exception as e:
             st.error(f"Error processing product: {product.get('asin', 'Unknown ASIN')}")
