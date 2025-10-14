@@ -236,7 +236,7 @@ with tab1:
     selected_columns = st.multiselect(
         "Select columns to display:",
         options=all_possible_columns,
-        default=[col for col in all_possible_columns if col in ["ASIN", "Title", "90-Day Avg. Rank", "Current Price", "analysis"]]
+        default=[] # Change this to an empty list
     )
 
     analyze_button = st.button("Analyze")
