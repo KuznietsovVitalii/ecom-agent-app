@@ -26,9 +26,6 @@ except FileNotFoundError:
 st.header("Chat with Keepa Expert Agent")
 st.info("Upload a CSV file or ask the AI agent anything about e-commerce and Keepa data.")
 
-# File uploader for CSV
-uploaded_file = st.file_uploader("Upload a CSV file for analysis", type="csv")
-
 # Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -37,6 +34,9 @@ if "messages" not in st.session_state:
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+
+# File uploader for CSV
+uploaded_file = st.file_uploader("Upload a CSV file for analysis", type="csv")
 
 # Process uploaded file if any
 if uploaded_file is not None:
