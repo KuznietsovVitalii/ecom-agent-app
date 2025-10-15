@@ -25,17 +25,7 @@ except FileNotFoundError:
 
 
 # --- Core Logic Function (Keepa related, currently not used in chat directly) ---
-sales_tiers = {
-    -1:0, 0: 50, 50: 100, 100: 200, 200: 300, 300: 400, 400: 500, 500: 600,
-    600: 700, 700: 800, 800: 900, 900: 1000, 1000: 2000, 2000: 3000, 3000: 4000,
-    4000: 5000, 5000: 6000, 6000: 7000, 7000: 8000, 8000: 9000, 9000: 10000,
-    10000: 20000, 20000: 30000, 30000: 40000, 40000: 50000, 50000: 60000,
-    60000: 70000, 70000: 80000, 80000: 90000, 90000:100000, 100000: 150000
-}
 
-def get_ai_analysis(asins):
-    st.warning("Keepa analysis function is not directly integrated into chat yet.")
-    return None
 
 
 # --- Chat with Agent ---
@@ -78,7 +68,7 @@ if prompt := st.chat_input("What is up?"):
         st.markdown(prompt)
 
     # Construct the full prompt for the AI
-    full_ai_prompt = "You are an expert e-commerce analyst with deep knowledge of Keepa data. "
+    full_ai_prompt = "You are an expert e-commerce analyst with deep knowledge of Keepa data. If the user asks for data that can be retrieved from Keepa, ask them for the ASINs and the specific data points they are interested in. "
     if "uploaded_data" in st.session_state and st.session_state.uploaded_data:
         full_ai_prompt += f"The user has provided the following CSV data for analysis: {st.session_state.uploaded_data}. "
     full_ai_prompt += f"The user's question is: {prompt}"
