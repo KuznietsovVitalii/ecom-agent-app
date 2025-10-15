@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import keepa
-import google.generativeai as genai
+import requests
 import json
 
 # --- Page Configuration ---
@@ -54,10 +54,8 @@ def get_ai_analysis(asins):
     # 1. Configure APIs
     try:
         api = keepa.Keepa(KEEPA_API_KEY)
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-2.5-flash')
     except Exception as e:
-        st.error(f"Failed to configure APIs. Please check your keys. Error: {e}")
+        st.error(f"Failed to configure Keepa API. Please check your key. Error: {e}")
         return None
 
     # 2. Fetch data from Keepa
@@ -197,20 +195,38 @@ def get_ai_analysis(asins):
     """
 
     try:
-        response = model.generate_content(prompt)
-        # Clean up the response to get only the JSON part
-        cleaned_response = response.text.strip().replace('```json', '').replace('```', '')
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+        headers = {'Content-Type': 'application/json'}
+        data = {"contents": [{"parts": [{"text": prompt}]}]}
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        
+        response_json = response.json()
+        
+        if 'candidates' not in response_json or not response_json['candidates']:
+            st.error("Failed to get analysis from AI: No candidates in response.")
+            st.text("AI Response was:")
+            st.json(response_json)
+            return raw_df
+
+        if 'content' not in response_json['candidates'][0] or 'parts' not in response_json['candidates'][0]['content'] or not response_json['candidates'][0]['content']['parts']:
+            st.error("Failed to get analysis from AI: No content in candidate.")
+            st.text("AI Response was:")
+            st.json(response_json)
+            return raw_df
+            
+        cleaned_response = response_json['candidates'][0]['content']['parts'][0]['text'].strip().replace('```json', '').replace('```', '')
         analysis_data = json.loads(cleaned_response)
         analysis_df = pd.DataFrame(analysis_data)
-        # Rename 'asin' to 'ASIN' to match the other dataframe
+
         if 'asin' in analysis_df.columns:
             analysis_df = analysis_df.rename(columns={'asin': 'ASIN'})
 
-    except (json.JSONDecodeError, Exception) as e:
+    except (requests.exceptions.RequestException, json.JSONDecodeError, Exception) as e:
         st.error(f"Failed to get or parse analysis from AI. Error: {e}")
-        st.text("AI Response was:")
-        st.text(response.text)
-        # If AI fails, we still return the raw data
+        if 'response' in locals():
+            st.text("AI Response was:")
+            st.text(response.text)
         return raw_df
 
     # 5. Merge raw data with analysis
@@ -383,7 +399,8 @@ with tab2:
                 full_response = ""
                 
                 try:
-                    chat_model = genai.GenerativeModel('gemini-2.5-flash')
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+                    headers = {'Content-Type': 'application/json'}
                     
                     # Limit the history and map roles for the API
                     max_history = 10
@@ -392,24 +409,25 @@ with tab2:
                     model_history = []
                     for msg in history_to_send:
                         role = "model" if msg["role"] == "assistant" else "user"
-                        model_history.append({"role": role, "parts": [msg["content"]]})
+                        model_history.append({"role": role, "parts": [{"text": msg["content"]}]})
 
-                    # Use generate_content with the history
-                    response = chat_model.generate_content(model_history, stream=True)
-
-                    for chunk in response:
-                        full_response += (chunk.text or "")
-                        message_placeholder.markdown(full_response + "▌")
+                    data = {"contents": model_history}
                     
-                    if not full_response.strip():
+                    response = requests.post(url, headers=headers, json=data)
+                    response.raise_for_status()
+
+                    response_json = response.json()
+
+                    if 'candidates' not in response_json or not response_json['candidates']:
                         full_response = "I'm sorry, I don't have a response for that."
+                    else:
+                        full_response = response_json['candidates'][0]['content']['parts'][0]['text']
 
                     message_placeholder.markdown(full_response)
 
-                except Exception as e:
+                except (requests.exceptions.RequestException, Exception) as e:
                     full_response = f"An error occurred: {e}"
-                    # Check if response object exists and has text
-                    if 'response' in locals() and hasattr(response, 'text'):
+                    if 'response' in locals():
                         full_response += f"\n\nRaw API Response: {response.text}"
                     message_placeholder.markdown(full_response)
 
