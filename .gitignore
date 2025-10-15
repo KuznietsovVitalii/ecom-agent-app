@@ -6,3 +6,6 @@ __pycache__/
 # IDE / Editor
 .vscode/
 .idea/
+
+# Frontend
+frontend/node_modules
