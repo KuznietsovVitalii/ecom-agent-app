@@ -61,7 +61,8 @@ if st.session_state.get("show_file_uploader"):
         try:
             df = pd.read_csv(uploaded_file)
             st.session_state.uploaded_data = df.to_json(orient="records", indent=2)
-            st.session_state.messages.append({"role": "assistant", "content": "CSV file received. What would you like to analyze or ask about this data?"})
+            st.success("CSV file uploaded successfully!")
+            st.session_state.messages.append({"role": "assistant", "content": "CSV file received. What changes would you like to make or analyze in this data?"})
             with st.expander("View uploaded CSV data"):
                 st.dataframe(df.head())
             st.session_state.show_file_uploader = False # Hide uploader after successful upload
