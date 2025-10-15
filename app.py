@@ -82,3 +82,18 @@ if prompt := st.chat_input("What is up?"):
                 message_placeholder.markdown(full_response)
 
     st.session_state.messages.append({"role": "assistant", "content": full_response})
+
+st.header("Debug")
+if st.button("List Available Models"):
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
+        response = requests.get(url)
+        response.raise_for_status()
+        models = response.json()
+        st.write("Available Models:")
+        st.json(models)
+    except (requests.exceptions.RequestException, Exception) as e:
+        st.error(f"An error occurred while listing models: {e}")
+        if 'response' in locals():
+            st.text("API Response was:")
+            st.text(response.text)
