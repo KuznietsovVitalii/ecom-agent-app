@@ -9,22 +9,8 @@ st.set_page_config(layout="wide")
 st.title("E-commerce Analysis Agent")
 
 # --- API Key & Secrets Instructions ---
-# Use st.secrets to securely access API keys
-try:
-    KEEPA_API_KEY = st.secrets["KEEPA_API_KEY"]
-    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-except FileNotFoundError:
-    st.error("Secrets file not found. Please add your API keys to the Streamlit Cloud secrets.")
-    st.info("""
-        To add your secrets:
-        1. Go to your app's dashboard on share.streamlit.io.
-        2. Click on 'Settings'.
-        3. Go to the 'Secrets' tab.
-        4. Add your keys in TOML format, like this:
-           KEEPA_API_KEY = "your_keepa_key_here"
-           GEMINI_API_KEY = "your_gemini_key_here"
-    """)
-    st.stop()
+KEEPA_API_KEY = st.text_input("Enter your KEEPA_API_KEY")
+GEMINI_API_KEY = st.text_input("Enter your GEMINI_API_KEY")
 
 sales_tiers = {
     -1:0,

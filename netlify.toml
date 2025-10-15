@@ -1,8 +1,0 @@
-[build]
-  command = "cd frontend && npm run build"
-  publish = "frontend/dist"
-
-[functions]
-  directory = "netlify/functions"
-  # Explicitly set the builder for python functions
-  builder = "python"
