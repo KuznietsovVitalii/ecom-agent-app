@@ -2,4 +2,4 @@ streamlit
 pandas
 keepa
 requests
-google-genai
+google-genai==1.43.0
