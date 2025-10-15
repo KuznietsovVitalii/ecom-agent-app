@@ -25,8 +25,6 @@ except FileNotFoundError:
 
 
 # --- Core Logic Function (Keepa related, currently not used in chat directly) ---
-# This function is kept for future integration if needed, but not directly called by the chat agent yet.
-# It would need to be adapted to be called by the agent based on user's request.
 sales_tiers = {
     -1:0, 0: 50, 50: 100, 100: 200, 200: 300, 300: 400, 400: 500, 500: 600,
     600: 700, 700: 800, 800: 900, 900: 1000, 1000: 2000, 2000: 3000, 3000: 4000,
@@ -36,8 +34,6 @@ sales_tiers = {
 }
 
 def get_ai_analysis(asins):
-    # This function is currently not directly used by the chat agent.
-    # It would need to be adapted to be called by the agent based on user's request.
     st.warning("Keepa analysis function is not directly integrated into chat yet.")
     return None
 
@@ -55,23 +51,22 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# File uploader for CSV within the chat context
-uploaded_file = st.file_uploader("Upload a CSV file for analysis", type="csv", key="chat_file_uploader")
+# Button to trigger file upload
+if st.button("Upload File"): # This button will appear in the chat messages flow
+    st.session_state.show_file_uploader = True
 
-# Process uploaded file if any
-if uploaded_file is not None:
-    try:
-        df = pd.read_csv(uploaded_file)
-        st.session_state.uploaded_data = df.to_json(orient="records", indent=2)
-        st.success("CSV file uploaded successfully!")
-        st.session_state.messages.append({"role": "assistant", "content": "CSV file received. What would you like to analyze or ask about this data?"})
-        # Display the first few rows of the uploaded CSV
-        with st.expander("View uploaded CSV data"):
-            st.dataframe(df.head())
-        # Clear the uploaded file widget after processing to prevent re-processing on rerun
-        uploaded_file = None # This might not visually clear the widget, but prevents re-reading
-    except Exception as e:
-        st.error(f"Error reading CSV file: {e}")
+if st.session_state.get("show_file_uploader"):
+    uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key="chat_file_uploader")
+    if uploaded_file is not None:
+        try:
+            df = pd.read_csv(uploaded_file)
+            st.session_state.uploaded_data = df.to_json(orient="records", indent=2)
+            st.session_state.messages.append({"role": "assistant", "content": "CSV file received. What would you like to analyze or ask about this data?"})
+            with st.expander("View uploaded CSV data"):
+                st.dataframe(df.head())
+            st.session_state.show_file_uploader = False # Hide uploader after successful upload
+        except Exception as e:
+            st.error(f"Error reading CSV file: {e}")
 
 # Accept user input
 if prompt := st.chat_input("What is up?"):
