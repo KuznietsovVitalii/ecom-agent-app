@@ -1,3 +1,5 @@
 streamlit
 pandas
+keepa
 requests
+google-genai
