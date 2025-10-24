@@ -49,8 +49,17 @@ def convert_time(keepa_time:int) -> pd.Timestamp:
     return converted
 
 def perform_keepa_analysis(asins, api_client):
-    st.header("DEBUG: perform_keepa_analysis STARTED")
     all_results = []
+    processed_asins = set()
+
+def get_asin_title_direct(asin, api_client):
+    try:
+        products = api_client.query(asin, domain=1) # domain=1 for US
+        if products and products[0]:
+            return products[0].get('title', 'Title not found')
+        return 'No product found'
+    except Exception as e:
+        return f"Error fetching title: {e}"
     processed_asins = set()
 
     # Fetch raw product data using get_products from keepa_modules
@@ -76,15 +85,6 @@ def perform_keepa_analysis(asins, api_client):
             continue
         
         processed_asins.add(asin_item)
-
-        # Debugging output
-        st.info(f"Title: {product.title}")
-        st.info(f"Brand: {product.brand}")
-        st.info(f"Min Monthly Sales: {product.min_sales}")
-        st.info(f"Max Monthly Sales: {product.max_sales}")
-        st.info(f"Avg Monthly Sales: {product.avg_sales}")
-        st.info(f"Current Amazon Price: {product.current_amazon_price}")
-        st.info(f"Current Buy Box Price: {product.current_full_price}")
 
         # Extract data using KeepaProduct methods
         title = product.title
@@ -261,6 +261,11 @@ if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce stra
                 if asins_in_prompt:
                     message_placeholder.info(f"Found ASINs: {', '.join(asins_in_prompt)}. Fetching detailed data from Keepa...")
                     
+                    # Get and display title directly for debugging
+                    for asin_to_check in asins_in_prompt:
+                        direct_title = get_asin_title_direct(asin_to_check, api)
+                        message_placeholder.write(f"Direct Title for {asin_to_check}: {direct_title}")
+
                     # Call the new advanced analysis function
                     keepa_df = perform_keepa_analysis(asins_in_ins_in_prompt, api)
                     
