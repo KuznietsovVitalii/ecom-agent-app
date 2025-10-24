@@ -445,4 +445,4 @@ Keepa Analysis Data:
                     if 'response' in locals():
                         error_message += f"\n\nRaw API Response: {response.text}"
                     message_placeholder.error(error_message)
-                    st.session_state.messages.append({"role": "assistant", "content": error_message})}
+                    st.session_state.messages.append({"role": "assistant", "content": error_message})
