@@ -4,6 +4,7 @@ import requests
 import json
 import time
 from io import StringIO
+import keepa # Added keepa import
 
 st.set_page_config(layout="wide")
 st.title("E-commerce Analysis Agent")
@@ -26,37 +27,154 @@ except (FileNotFoundError, KeyError) as e:
     ''')
     st.stop()
 
-# --- Keepa API Logic ---
-def get_product_data(asins):
-    url = "https://api.keepa.com/product"
-    params = {
-        "key": KEEPA_API_KEY,
-        "domain": 1,  # 1 for .com (US)
-        "asin": ",".join(asins),
-        "stats": 90,  # Include 90-day average stats
-        "offers": 20
-    }
+# --- Keepa API Logic (using keepa library) ---
+api = keepa.Keepa(KEEPA_API_KEY, timeout=40) # Initialize Keepa API client
+
+# --- Utility functions and data from keepa_competitor_research.py ---
+sales_tiers = {
+    -1:0, 0: 50, 50: 100, 100: 200, 200: 300, 300: 400, 400: 500, 500: 600,
+    600: 700, 700: 800, 800: 900, 900: 1000, 1000: 2000, 2000: 3000, 3000: 4000,
+    4000: 5000, 5000: 6000, 6000: 7000, 7000: 8000, 8000: 9000, 9000: 10000,
+    10000: 20000, 20000: 30000, 30000: 40000, 40000: 50000, 50000: 60000,
+    60000: 70000, 70000: 80000, 80000: 90000, 90000:100000, 100000: 150000
+}
+
+def convert_time(keepa_time:int) -> pd.Timestamp:
+    if keepa_time == 0:
+        return 'unknown'
+    converted = (keepa_time + 21564000) * 60000
+    converted = pd.to_datetime(converted, unit = 'ms').date()
+    return converted
+
+def perform_keepa_analysis(asins):
+    all_results = []
     
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    while True:
+    # Keep track of processed ASINs to avoid duplicates if variations are pulled
+    processed_asins = set()
+
+    # Query Keepa API in batches
+    for i in range(0, len(asins), 100): # Keepa API limit is 100 ASINs per request
+        batch = asins[i:i+100]
+        st.info(f"Fetching data for ASIN batch {i//100 + 1}...")
+        
         try:
-            response = requests.get(url, params=params)
-            response.raise_for_status()
-            status_text.success("Successfully fetched data from Keepa.")
-            progress_bar.progress(100)
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            if hasattr(e, 'response') and e.response is not None and e.response.status_code == 429:
-                status_text.warning("Keepa rate limit hit. Waiting 60 seconds to retry...")
-                for i in range(60):
-                    time.sleep(1)
-                    progress_bar.progress((i + 1) / 60)
+            products = api.query(batch, rating=True, domain=1) # domain 1 for US
+        except Exception as e:
+            st.error(f"Error querying Keepa API for batch {i//100 + 1}: {e}")
+            continue
+
+        if not products:
+            st.warning(f"No products found for batch starting with {batch[0]}.")
+            continue
+
+        for product in products:
+            asin = product.get('asin')
+            if not asin or asin in processed_asins:
                 continue
-            else:
-                st.error(f"An unrecoverable error occurred with Keepa API: {e}")
-                return None
+            processed_asins.add(asin)
+
+            title = product.get('title')
+            brand = product.get('brand')
+            listed_since = convert_time(product.get('listedSince'))
+
+            # Monthly Sales
+            monthly_sales = product.get('monthlySold', -1)
+            monthly_sales_max = sales_tiers.get(monthly_sales, 0) # assess max monthly sales based on sales tiers
+            if monthly_sales == -1:
+                monthly_sales = 0
+            avg_monthly_sales = int(round(monthly_sales * 0.9 + monthly_sales_max * 0.1, 0))
+
+            # Price and Discount
+            price = 0
+            try:
+                # Assuming 'df_NEW' is the latest new price
+                price_data = product.get('data', {}).get('df_NEW', [])
+                if price_data:
+                    # Find the last valid price
+                    for p_val in reversed(price_data):
+                        if isinstance(p_val, list) and len(p_val) > 1 and p_val[1] is not None:
+                            price = p_val[1] / 100.0 # Keepa prices are in cents
+                            break
+            except Exception:
+                price = 0
+
+            coupon = product.get('coupon')
+            discount = 0
+            if coupon:
+                discount_value = coupon[0]
+                if discount_value <= 0: # Negative value means percentage
+                    discount = round(price * abs(discount_value) / 100, 2)
+                else: # Positive value means absolute discount in cents
+                    discount = discount_value / 100.0
+            final_price = price - discount
+
+            # FBA Fees
+            fees = 0
+            try:
+                fees = product.get('fbaFees', {}).get('pickAndPackFee', 0) / 100.0
+            except Exception:
+                fees = 0
+
+            # Reviews and Rating
+            reviews = None
+            try:
+                reviews_data = product.get('data', {}).get('COUNT_REVIEWS', [])
+                if reviews_data:
+                    reviews = reviews_data[-1][1] # Last value
+            except Exception:
+                reviews = None
+
+            rating = None
+            try:
+                rating_data = product.get('data', {}).get('RATING', [])
+                if rating_data:
+                    rating = rating_data[-1][1] / 100.0 # Last value, Keepa rating is * 100
+            except Exception:
+                rating = None
+
+            # Best Sellers Rank (BSR)
+            bsr = None
+            top_category = product.get('salesRankReference')
+            if top_category and top_category != -1:
+                bsr_history = product.get('salesRanks')
+                if bsr_history:
+                    # Get the last BSR for the top category
+                    bsr_list = bsr_history.get(str(top_category), [])
+                    if bsr_list:
+                        bsr = bsr_list[-1][1] # Last value
+            
+            parent_asin = product.get('parentAsin')
+            
+            # Image and Product Links
+            images = str(product.get('imagesCSV', '')).split(',')
+            main_image_link = f'https://m.media-amazon.com/images/I/{images[0]}' if images and images[0] else ''
+            product_link = f'https://www.amazon.com/dp/{asin}'
+
+            all_results.append({
+                'ASIN': asin,
+                'Title': title,
+                'Brand': brand,
+                'Listed Since': listed_since,
+                'Min Monthly Sales': monthly_sales,
+                'Max Monthly Sales': monthly_sales_max,
+                'Avg Monthly Sales': avg_monthly_sales,
+                'Price': f"${price:.2f}",
+                'Discount': f"${discount:.2f}",
+                'Final Price': f"${final_price:.2f}",
+                'FBA Fees': f"${fees:.2f}",
+                'Reviews': reviews,
+                'Rating': rating,
+                'BSR': bsr,
+                'Parent ASIN': parent_asin,
+                'Main Image Link': main_image_link,
+                'Product Link': product_link
+            })
+        
+        if i + 100 < len(asins):
+            st.write("Waiting 1 second before next batch to avoid rate limiting...")
+            time.sleep(1) # Small delay to be safe, Keepa library handles rate limits but good practice
+
+    return pd.DataFrame(all_results)
 
 # --- Chat with Agent ---
 st.header("Chat with Keepa Expert Agent")
@@ -119,14 +237,21 @@ if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce stra
                 asins_in_prompt = [word for word in prompt.replace(",", " ").split() if len(word) == 10 and word.startswith('B') and word.isupper()]
                 
                 if asins_in_prompt:
-                    message_placeholder.info(f"Found ASINs: {', '.join(asins_in_prompt)}. Fetching data from Keepa...")
-                    keepa_data = get_product_data(asins_in_prompt)
-                    if keepa_data and 'products' in keepa_data:
-                        # For now, just show the raw JSON. This can be improved to be a table or a summary.
-                        st.session_state.messages.append({"role": "assistant", "content": f"Here is the Keepa data for the requested ASINs:\n\n```json\n{json.dumps(keepa_data['products'], indent=2)}\n```"})
+                    message_placeholder.info(f"Found ASINs: {', '.join(asins_in_prompt)}. Fetching detailed data from Keepa...")
+                    
+                    # Call the new advanced analysis function
+                    keepa_df = perform_keepa_analysis(asins_in_prompt)
+                    
+                    if not keepa_df.empty:
+                        # Display results in a more readable format (e.g., a table)
+                        st.session_state.messages.append({"role": "assistant", "content": "Here is the detailed Keepa analysis for the requested ASINs:"})
+                        st.session_state.messages.append({"role": "assistant", "content": keepa_df.to_markdown(index=False)})
+                        
+                        # Also store the data in session state for potential AI analysis
+                        st.session_state.keepa_analysis_data = keepa_df.to_json(orient="records", indent=2)
                         st.rerun()
                     else:
-                        message_placeholder.error("Could not retrieve data from Keepa for the specified ASINs.")
+                        message_placeholder.error("Could not retrieve detailed data from Keepa for the specified ASINs.")
                 else:
                     message_placeholder.warning("You mentioned analyzing ASINs, but I couldn't find any valid ASINs in your message. Please provide 10-character ASINs starting with 'B'.")
             else:
@@ -166,6 +291,12 @@ if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce stra
 
 Uploaded CSV Data:
 {st.session_state.uploaded_file_data}"""
+                    
+                    if "keepa_analysis_data" in st.session_state and st.session_state.keepa_analysis_data:
+                        current_user_message_text += f"""
+
+Keepa Analysis Data:
+{st.session_state.keepa_analysis_data}"""
 
                     # Add the current user prompt (potentially with file data)
                     model_contents.append({"role": "user", "parts": [{"text": current_user_message_text}]})
