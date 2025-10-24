@@ -203,6 +203,25 @@ def perform_keepa_analysis(asins):
 
     return pd.DataFrame(all_results)
 
+def get_bestsellers(category_id: str, domain_id: int, sales_range: int = 0):
+    """
+    Retrieves a list of best-selling ASINs from Keepa based on category and sales range.
+    """
+    try:
+        # Keepa API for bestsellers is different from product query
+        # It returns a list of ASINs directly
+        bestsellers_data = api.query_bestsellers(category=category_id, domain=domain_id, sales_range=sales_range)
+        
+        if bestsellers_data and 'bestSellersList' in bestsellers_data:
+            # The 'bestSellersList' contains a list of ASINs
+            return bestsellers_data['bestSellersList']['asinList']
+        else:
+            st.warning(f"No bestsellers found for category {category_id} in domain {domain_id}.")
+            return []
+    except Exception as e:
+        st.error(f"Error fetching bestsellers from Keepa API: {e}")
+        return []
+
 # --- Chat with Agent ---
 st.header("Chat with Keepa Expert Agent")
 st.info("Ask the AI agent anything about e-commerce and Keepa data.")
@@ -272,7 +291,7 @@ if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce stra
                     message_placeholder.info(f"Found ASINs: {', '.join(asins_in_prompt)}. Fetching detailed data from Keepa...")
                     
                     # Call the new advanced analysis function
-                    keepa_df = perform_keepa_analysis(asins_in_prompt)
+                    keepa_df = perform_keepa_analysis(asins_in_ins_in_prompt)
                     
                     if not keepa_df.empty:
                         # Display results in a more readable format (e.g., a table)
@@ -286,6 +305,29 @@ if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce stra
                         message_placeholder.error("Could not retrieve detailed data from Keepa for the specified ASINs.")
                 else:
                     message_placeholder.warning("You mentioned analyzing ASINs, but I couldn't find any valid ASINs in your message. Please provide 10-character ASINs starting with 'B'.")
+            elif "best sellers" in prompt.lower() or "top products" in prompt.lower():
+                # Extract category and domain from prompt (simplified for now)
+                # This part needs to be more robust, potentially using Gemini to extract entities
+                category_id = "0" # Default to root category for now, or try to extract from prompt
+                domain_id = 1 # Default to .com (US)
+                sales_range = 90 # Default to 90-day average
+
+                message_placeholder.info(f"Fetching best sellers for category {category_id} (domain {domain_id}, {sales_range}-day average)...")
+                bestseller_asins = get_bestsellers(category_id, domain_id, sales_range)
+
+                if bestseller_asins:
+                    message_placeholder.success(f"Found {len(bestseller_asins)} best-selling ASINs. Analyzing the top 5...")
+                    # Analyze the top few bestsellers for detailed data
+                    top_bestsellers_df = perform_keepa_analysis(bestseller_asins[:5]) # Analyze top 5
+                    if not top_bestsellers_df.empty:
+                        st.session_state.messages.append({"role": "assistant", "content": "Here is a detailed analysis of the top 5 best-selling ASINs:"})
+                        st.session_state.messages.append({"role": "assistant", "content": top_bestsellers_df.to_markdown(index=False)})
+                        st.session_state.keepa_analysis_data = top_bestsellers_df.to_json(orient="records", indent=2)
+                        st.rerun()
+                    else:
+                        message_placeholder.error("Could not retrieve detailed data for the top best-selling ASINs.")
+                else:
+                    message_placeholder.warning("Could not find best sellers for the specified criteria. Please try a different category or refine your request.")
             else:
                 # Default to Gemini for general queries
                 try:
@@ -352,4 +394,4 @@ Keepa Analysis Data:
                     if 'response' in locals():
                         error_message += f"\n\nRaw API Response: {response.text}"
                     message_placeholder.error(error_message)
-                    st.session_state.messages.append({"role": "assistant", "content": error_message})
+                    st.session_state.messages.append({"role": "assistant", "content": error_message})}
