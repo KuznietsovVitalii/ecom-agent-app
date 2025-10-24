@@ -60,18 +60,30 @@ def perform_keepa_analysis(asins, api_client):
         return pd.DataFrame()
 
     for asin_item in asins:
+        st.info(f"Processing ASIN: {asin_item}")
         if asin_item in processed_asins:
+            st.info(f"ASIN {asin_item} already processed, skipping.")
             continue
         
         product = KeepaProduct(asin_item, domain="US", api_client=api_client) # Assuming US domain for now
         product.extract_from_products(products_data)
         product.get_last_days(days=90) # Call this to populate sales and price data
 
+        st.info(f"Product exists for {asin_item}: {product.exists}")
         if not product.exists:
             st.warning(f"Product data not found for ASIN: {asin_item}")
             continue
         
         processed_asins.add(asin_item)
+
+        # Debugging output
+        st.info(f"Title: {product.title}")
+        st.info(f"Brand: {product.brand}")
+        st.info(f"Min Monthly Sales: {product.min_sales}")
+        st.info(f"Max Monthly Sales: {product.max_sales}")
+        st.info(f"Avg Monthly Sales: {product.avg_sales}")
+        st.info(f"Current Amazon Price: {product.current_amazon_price}")
+        st.info(f"Current Buy Box Price: {product.current_full_price}")
 
         # Extract data using KeepaProduct methods
         title = product.title
