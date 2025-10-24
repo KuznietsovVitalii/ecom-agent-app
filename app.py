@@ -105,10 +105,30 @@ if prompt := st.chat_input("Ask me about ASINs, products, or e-commerce strategy
                 try:
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
                     headers = {'Content-Type': 'application/json'}
+
+                    # 1. Define the system prompt for concise, data-driven answers
+                    system_prompt = """You are an expert e-commerce analyst with deep knowledge of Keepa data.
+- Answer the user's question directly and concisely.
+- When asked for specific data (like price, rank, etc.), provide just that data without conversational filler.
+- Avoid unnecessary explanations.
+- Be brief and to the point."""
+
+                    # 2. Construct chat history for the API
+                    max_history = 10 # Remember the last 10 messages
+                    history_to_send = st.session_state.messages[-max_history:]
+
+                    # Map roles for the Gemini API (user and model)
+                    model_contents = [{"role": "user", "parts": [{"text": system_prompt}]},{"role": "model", "parts": [{"text": "Understood. I will be a direct and concise e-commerce expert."}]}]
+                    for msg in history_to_send:
+                        role = "model" if msg["role"] == "assistant" else "user"
+                        # Ensure we don't add the user's latest prompt twice
+                        if msg["content"] != prompt:
+                            model_contents.append({"role": role, "parts": [{"text": msg["content"]}]})
                     
-                    # Construct a simple prompt for the model
-                    full_ai_prompt = f"You are an expert e-commerce analyst with deep knowledge of Keepa data. The user's question is: {prompt}"
-                    data = {"contents": [{"parts": [{"text": full_ai_prompt}]}]}
+                    # Add the current user prompt
+                    model_contents.append({"role": "user", "parts": [{"text": prompt}]})
+
+                    data = {"contents": model_contents}
                     
                     response = requests.post(url, headers=headers, json=data)
                     response.raise_for_status()
