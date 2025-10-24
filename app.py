@@ -58,7 +58,7 @@ def perform_keepa_analysis(asins):
         st.info(f"Fetching data for ASIN batch {i//100 + 1}...")
         
         try:
-            products = api.query(batch, rating=True, domain=1) # domain 1 for US
+            products = api.query(batch, rating=True, domain=1, stats=90, offers=20) # Added stats and offers
         except Exception as e:
             st.error(f"Error querying Keepa API for batch {i//100 + 1}: {e}")
             continue
@@ -84,22 +84,42 @@ def perform_keepa_analysis(asins):
                 monthly_sales = 0
             avg_monthly_sales = int(round(monthly_sales * 0.9 + monthly_sales_max * 0.1, 0))
 
-            # Price and Discount
-            price = 0
-            try:
-                # Assuming 'df_NEW' is the latest new price
-                price_data = product.get('data', {}).get('df_NEW', [])
-                if price_data:
-                    # Find the last valid price
-                    for p_val in reversed(price_data):
-                        if isinstance(p_val, list) and len(p_val) > 1 and p_val[1] is not None:
-                            price = p_val[1] / 100.0 # Keepa prices are in cents
-                            break
-            except Exception:
-                price = 0
+            # Extracting stats for current and average values
+            stats = product.get('stats', {})
+
+            # Amazon Price
+            current_amazon_price = stats.get('amazonPrice', {}).get('current', None) / 100.0 if stats.get('amazonPrice', {}).get('current') is not None else None
+            avg_amazon_price_90 = stats.get('amazonPrice', {}).get('avg', None) / 100.0 if stats.get('amazonPrice', {}).get('avg') is not None else None
+
+            # Buy Box Price
+            current_buybox_price = stats.get('buyBoxPrice', {}).get('current', None) / 100.0 if stats.get('buyBoxPrice', {}).get('current') is not None else None
+            avg_buybox_price_90 = stats.get('buyBoxPrice', {}).get('avg', None) / 100.0 if stats.get('buyBoxPrice', {}).get('avg') is not None else None
+
+            # Sales Rank (BSR)
+            current_bsr = stats.get('salesRank', {}).get('current', None)
+            avg_bsr_90 = stats.get('salesRank', {}).get('avg', None)
+
+            # Amazon OOS percentage (Out of Stock)
+            amazon_oos_90 = stats.get('amazonOOSPercentage', None)
+
+            # Price drop (last 30 days) - Keepa API doesn't directly provide "price drop %" for a period.
+            # This would require analyzing historical data. For now, we'll leave it as N/A or calculate if possible.
+            # This is a complex calculation from raw data, so for now, we'll just note if price has changed.
+            price_drop_30_days = "N/A" # Placeholder, requires more complex history analysis
+
+            # Number of sellers (New, FBA/FBM)
+            # Keepa 'offers' field can give this, but 'stats' also has 'offerCount' for new offers
+            new_offer_count = stats.get('offerCount', {}).get('current', None)
+            # To differentiate FBA/FBM, we'd need to parse the 'offers' array, which is more complex.
+            # For now, let's just get total new offer count.
+            sellers_new_fba_fbm = new_offer_count # Placeholder, needs more detailed parsing of offers
+
+            # Price and Discount (existing logic, might need adjustment based on new price data)
+            price = current_buybox_price if current_buybox_price is not None else (current_amazon_price if current_amazon_price is not None else 0)
+            final_price = price # Simplified for now, as discount logic is complex
+            discount = 0 # Simplified for now
 
             coupon = product.get('coupon')
-            discount = 0
             if coupon:
                 discount_value = coupon[0]
                 if discount_value <= 0: # Negative value means percentage
@@ -108,14 +128,14 @@ def perform_keepa_analysis(asins):
                     discount = discount_value / 100.0
             final_price = price - discount
 
-            # FBA Fees
+            # FBA Fees (existing logic)
             fees = 0
             try:
                 fees = product.get('fbaFees', {}).get('pickAndPackFee', 0) / 100.0
             except Exception:
                 fees = 0
 
-            # Reviews and Rating
+            # Reviews and Rating (existing logic)
             reviews = None
             try:
                 reviews_data = product.get('data', {}).get('COUNT_REVIEWS', [])
@@ -132,16 +152,15 @@ def perform_keepa_analysis(asins):
             except Exception:
                 rating = None
 
-            # Best Sellers Rank (BSR)
-            bsr = None
-            top_category = product.get('salesRankReference')
-            if top_category and top_category != -1:
-                bsr_history = product.get('salesRanks')
-                if bsr_history:
-                    # Get the last BSR for the top category
-                    bsr_list = bsr_history.get(str(top_category), [])
-                    if bsr_list:
-                        bsr = bsr_list[-1][1] # Last value
+            # Best Sellers Rank (BSR) (existing logic, now using current_bsr and avg_bsr_90)
+            # bsr = None # Removed, now using current_bsr and avg_bsr_90
+            # top_category = product.get('salesRankReference')
+            # if top_category and top_category != -1:
+            #     bsr_history = product.get('salesRanks')
+            #     if bsr_history:
+            #         bsr_list = bsr_history.get(str(top_category), [])
+            #         if bsr_list:
+            #             bsr = bsr_list[-1][1] # Last value
             
             parent_asin = product.get('parentAsin')
             
@@ -158,13 +177,20 @@ def perform_keepa_analysis(asins):
                 'Min Monthly Sales': monthly_sales,
                 'Max Monthly Sales': monthly_sales_max,
                 'Avg Monthly Sales': avg_monthly_sales,
-                'Price': f"${price:.2f}",
+                'Current Amazon Price': f"${current_amazon_price:.2f}" if current_amazon_price is not None else 'N/A',
+                'Avg 90-day Amazon Price': f"${avg_amazon_price_90:.2f}" if avg_amazon_price_90 is not None else 'N/A',
+                'Current Buy Box Price': f"${current_buybox_price:.2f}" if current_buybox_price is not None else 'N/A',
+                'Avg 90-day Buy Box Price': f"${avg_buybox_price_90:.2f}" if avg_buybox_price_90 is not None else 'N/A',
+                'Current BSR': current_bsr if current_bsr is not None else 'N/A',
+                'Avg 90-day BSR': avg_bsr_90 if avg_bsr_90 is not None else 'N/A',
+                'Amazon OOS 90-day %': f"{amazon_oos_90}%" if amazon_oos_90 is not None else 'N/A',
+                'Price Drop 30-day %': price_drop_30_days,
+                'New Seller Count': sellers_new_fba_fbm if sellers_new_fba_fbm is not None else 'N/A',
                 'Discount': f"${discount:.2f}",
                 'Final Price': f"${final_price:.2f}",
                 'FBA Fees': f"${fees:.2f}",
-                'Reviews': reviews,
-                'Rating': rating,
-                'BSR': bsr,
+                'Reviews': reviews if reviews is not None else 'N/A',
+                'Rating': rating if rating is not None else 'N/A',
                 'Parent ASIN': parent_asin,
                 'Main Image Link': main_image_link,
                 'Product Link': product_link
