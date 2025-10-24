@@ -62,24 +62,6 @@ def get_product_data(asins):
 st.header("Chat with Keepa Expert Agent")
 st.info("Ask the AI agent anything about e-commerce and Keepa data.")
 
-# --- File Uploader (Paperclip style) ---
-def handle_file_upload():
-    if st.session_state.file_uploader_key is not None:
-        uploaded_file = st.session_state.file_uploader_key
-        stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
-        df = pd.read_csv(stringio)
-        st.session_state.uploaded_file_data = df.to_json(orient="records", indent=2)
-        st.session_state.messages.append({"role": "assistant", "content": f"CSV файл '{uploaded_file.name}' загружен и готов к анализу."})
-        st.rerun() # Rerun to update chat immediately
-
-st.file_uploader(
-    "📎 Загрузить CSV для анализа",
-    type="csv",
-    key="file_uploader_key",
-    on_change=handle_file_upload,
-    label_visibility="collapsed"
-)
-
 # Initialize uploaded_file_data in session state
 if "uploaded_file_data" not in st.session_state:
     st.session_state.uploaded_file_data = None
@@ -94,12 +76,37 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # Accept user input
-if prompt := st.chat_input("Ask me about ASINs, products, or e-commerce strategy..."):
-    # Add user message to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    # Display user message in chat message container
-    with st.chat_message("user"):
-        st.markdown(prompt)
+if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce strategy...", accept_file=True, file_type="csv"):
+    # Extract text and files from the prompt object
+    prompt = prompt_obj.text if prompt_obj.text else ""
+    uploaded_files = prompt_obj.files if prompt_obj.files else []
+
+    # Process uploaded files if any
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
+            df = pd.read_csv(stringio)
+            st.session_state.uploaded_file_data = df.to_json(orient="records", indent=2)
+            st.session_state.messages.append({"role": "assistant", "content": f"CSV файл '{uploaded_file.name}' загружен и готов к анализу."})
+            # If there's only a file and no text, we might want to rerun or just process the file.
+            # For now, let's just add a message and continue with the text prompt if any.
+
+    # Add user message (text part) to chat history
+    if prompt:
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        # Display user message in chat message container
+        with st.chat_message("user"):
+            st.markdown(prompt)
+    elif uploaded_files and not prompt: # If only files were uploaded without text
+        # Add a placeholder message to history if only files were uploaded
+        st.session_state.messages.append({"role": "user", "content": f"Uploaded {len(uploaded_files)} file(s)."})
+        with st.chat_message("user"):
+            st.markdown(f"Uploaded {len(uploaded_files)} file(s).")
+
+    # Display assistant response in chat message container
+    with st.chat_message("assistant"):
+        with st.spinner("Agent is thinking..."):
+            message_placeholder = st.empty()
 
     # Display assistant response in chat message container
     with st.chat_message("assistant"):
@@ -153,9 +160,12 @@ if prompt := st.chat_input("Ask me about ASINs, products, or e-commerce strategy
                             model_contents.append({"role": role, "parts": [{"text": msg["content"]}]})
                     
                     # Add uploaded file data to the current user prompt if available
-                    current_user_message_text = prompt
+                    current_user_message_text = prompt # This 'prompt' is the text part from prompt_obj
                     if st.session_state.uploaded_file_data:
-                        current_user_message_text += f"\n\nUploaded CSV Data:\n{st.session_state.uploaded_file_data}"
+                        current_user_message_text += f"
+
+Uploaded CSV Data:
+{st.session_state.uploaded_file_data}"
 
                     # Add the current user prompt (potentially with file data)
                     model_contents.append({"role": "user", "parts": [{"text": current_user_message_text}]})
