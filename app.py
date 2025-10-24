@@ -65,6 +65,7 @@ def perform_keepa_analysis(asins, api_client):
         
         product = KeepaProduct(asin_item, domain="US", api_client=api_client) # Assuming US domain for now
         product.extract_from_products(products_data)
+        product.get_last_days(days=90) # Call this to populate sales and price data
 
         if not product.exists:
             st.warning(f"Product data not found for ASIN: {asin_item}")
