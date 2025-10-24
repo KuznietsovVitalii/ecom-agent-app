@@ -5,6 +5,7 @@ import json
 import time
 from io import StringIO
 import keepa # Added keepa import
+import re # Added re import
 
 st.set_page_config(layout="wide")
 st.title("E-commerce Analysis Agent")
@@ -258,9 +259,14 @@ if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce stra
             message_placeholder = st.empty()
             
             # Basic tool use: Check if the user wants to analyze ASINs
-            if "analyze" in prompt.lower() and "asin" in prompt.lower():
-                # A simple way to extract ASINs (can be improved with regex)
-                asins_in_prompt = [word for word in prompt.replace(",", " ").split() if len(word) == 10 and word.startswith('B') and word.isupper()]
+            if "analyze" in prompt.lower() and ("asin" in prompt.lower() or "amazon.com/dp" in prompt.lower()):
+                # Improved ASIN extraction using regex to find 10-character ASINs (B00...)
+                # This regex looks for patterns like B00... or B0... in words or URLs
+                asin_pattern = re.compile(r'(B[0-9A-Z]{9})')
+                found_asins = asin_pattern.findall(prompt)
+                
+                # Remove duplicates and ensure they are valid ASINs
+                asins_in_prompt = list(set([asin for asin in found_asins if len(asin) == 10 and asin.startswith('B') and asin.isupper()]))
                 
                 if asins_in_prompt:
                     message_placeholder.info(f"Found ASINs: {', '.join(asins_in_prompt)}. Fetching detailed data from Keepa...")
