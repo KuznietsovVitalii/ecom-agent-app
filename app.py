@@ -25,7 +25,7 @@ except (FileNotFoundError, KeyError) as e:
         4. Add your keys in TOML format, like this:
 
            GEMINI_API_KEY = "your_gemini_key_here"
-           KEEPA_API_KEY = "icj30t3ms9osic264u5e1cqed0a2gl1gh33jb5k1eq0qmeo462qnfhb2b86rrfms"
+           KEEPA_API_KEY = "your_keepa_key_here"
     ''')
     st.stop()
 
