@@ -49,6 +49,7 @@ def convert_time(keepa_time:int) -> pd.Timestamp:
     return converted
 
 def perform_keepa_analysis(asins, api_client):
+    st.header("DEBUG: perform_keepa_analysis STARTED")
     all_results = []
     processed_asins = set()
 
