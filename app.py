@@ -48,12 +48,12 @@ def convert_time(keepa_time:int) -> pd.Timestamp:
     converted = pd.to_datetime(converted, unit = 'ms').date()
     return converted
 
-def perform_keepa_analysis(asins):
+def perform_keepa_analysis(asins, api_client):
     all_results = []
     processed_asins = set()
 
     # Fetch raw product data using get_products from keepa_modules
-    products_data = get_products(asins)
+    products_data = get_products(asins, api_client=api_client)
 
     if not products_data:
         st.warning(f"No products data found for the given ASINs.")
@@ -63,7 +63,7 @@ def perform_keepa_analysis(asins):
         if asin_item in processed_asins:
             continue
         
-        product = KeepaProduct(asin_item, domain="US") # Assuming US domain for now
+        product = KeepaProduct(asin_item, domain="US", api_client=api_client) # Assuming US domain for now
         product.extract_from_products(products_data)
 
         if not product.exists:
@@ -248,7 +248,7 @@ if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce stra
                     message_placeholder.info(f"Found ASINs: {', '.join(asins_in_prompt)}. Fetching detailed data from Keepa...")
                     
                     # Call the new advanced analysis function
-                    keepa_df = perform_keepa_analysis(asins_in_ins_in_prompt)
+                    keepa_df = perform_keepa_analysis(asins_in_ins_in_prompt, api)
                     
                     if not keepa_df.empty:
                         # Display results in a more readable format (e.g., a table)
@@ -275,7 +275,7 @@ if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce stra
                 if bestseller_asins:
                     message_placeholder.success(f"Found {len(bestseller_asins)} best-selling ASINs. Analyzing the top 5...")
                     # Analyze the top few bestsellers for detailed data
-                    top_bestsellers_df = perform_keepa_analysis(bestseller_asins[:5]) # Analyze top 5
+                    top_bestsellers_df = perform_keepa_analysis(bestseller_asins[:5], api) # Analyze top 5
                     if not top_bestsellers_df.empty:
                         st.session_state.messages.append({"role": "assistant", "content": "Here is a detailed analysis of the top 5 best-selling ASINs:"})
                         st.session_state.messages.append({"role": "assistant", "content": top_bestsellers_df.to_markdown(index=False)})
@@ -305,7 +305,7 @@ if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce stra
                     # Extract ASINs from deals
                     deal_asins = [deal.get('asin') for deal in deals if deal.get('asin')]
                     if deal_asins:
-                        top_deals_df = perform_keepa_analysis(deal_asins[:5]) # Analyze top 5 deals
+                        top_deals_df = perform_keepa_analysis(deal_asins[:5], api) # Analyze top 5 deals
                         if not top_deals_df.empty:
                             st.session_state.messages.append({"role": "assistant", "content": "Here is a detailed analysis of the top 5 deals:"})
                             st.session_state.messages.append({"role": "assistant", "content": top_deals_df.to_markdown(index=False)})

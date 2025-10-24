@@ -5,11 +5,7 @@ import pandas as pd
 import streamlit as st
 import time
 
-KEEPA_KEY = os.getenv("KEEPA_KEY", "")
-
-
 class KeepaProduct:
-    api = keepa.Keepa(KEEPA_KEY, timeout=60)
     # create sales ranges (min - max)
     sales_tiers: dict = {
         -1: 0,
@@ -45,7 +41,7 @@ class KeepaProduct:
         100000: 150000,
     }
 
-    def __init__(self, asin=None, domain="US"):
+    def __init__(self, asin=None, domain="US", api_client=None):
         self.exists: bool = False
         self.asin: str = input("ASIN?\n\n") if not asin else asin
         self.domain: str = domain
@@ -58,6 +54,7 @@ class KeepaProduct:
         self.initial_days: int = 360
         self.variations = set()
         self.avg_price = 0
+        self.api = api_client
 
     def __ge__(self, other):
         return self.max_sales >= other.max_sales
@@ -96,7 +93,7 @@ class KeepaProduct:
     def query(self):
         if not self.data:
             try:
-                self.data = KeepaProduct.api.query(self.asin, domain=self.domain)
+                self.data = self.api.query(self.asin, domain=self.domain)
             except Exception:
                 self.data = [{}]
 
@@ -423,25 +420,22 @@ class KeepaProduct:
             self.avg_price = self.last_days["final price"].mean()
 
 
-def get_products(asins: list, domain="US", update=None):
-    api = keepa.Keepa(KEEPA_KEY, timeout=60)
-    products = api.query(asins, domain=domain, update=update)
+def get_products(asins: list, domain="US", update=None, api_client=None):
+    products = api_client.query(asins, domain=domain, update=update)
     return products
 
 
-def get_tokens(api_key=KEEPA_KEY):
-    api = keepa.Keepa(api_key, timeout=60)
-    api.update_status()
-    return api.tokens_left
+def get_tokens(api_client=None):
+    api_client.update_status()
+    return api_client.tokens_left
 
 
-def get_product_details(asins: list[str]):
-    api = keepa.Keepa(KEEPA_KEY, timeout=60)
-    tokens = api.tokens_left
+def get_product_details(asins: list[str], api_client=None):
+    tokens = api_client.tokens_left
     if tokens < len(asins):
         st.write("Please wait, not enough tokens to pull data from Amazon")
         time.sleep(20)
-    products = api.query(asins)
+    products = api_client.query(asins)
     items = {}
     for p in products:
         asin = p.get("asin")
