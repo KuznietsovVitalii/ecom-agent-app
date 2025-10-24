@@ -62,6 +62,28 @@ def get_product_data(asins):
 st.header("Chat with Keepa Expert Agent")
 st.info("Ask the AI agent anything about e-commerce and Keepa data.")
 
+# --- File Uploader (Paperclip style) ---
+def handle_file_upload():
+    if st.session_state.file_uploader_key is not None:
+        uploaded_file = st.session_state.file_uploader_key
+        stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
+        df = pd.read_csv(stringio)
+        st.session_state.uploaded_file_data = df.to_json(orient="records", indent=2)
+        st.session_state.messages.append({"role": "assistant", "content": f"CSV файл '{uploaded_file.name}' загружен и готов к анализу."})
+        st.rerun() # Rerun to update chat immediately
+
+st.file_uploader(
+    "📎 Загрузить CSV для анализа",
+    type="csv",
+    key="file_uploader_key",
+    on_change=handle_file_upload,
+    label_visibility="collapsed"
+)
+
+# Initialize uploaded_file_data in session state
+if "uploaded_file_data" not in st.session_state:
+    st.session_state.uploaded_file_data = None
+
 # Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -107,7 +129,7 @@ if prompt := st.chat_input("Ask me about ASINs, products, or e-commerce strategy
                     headers = {'Content-Type': 'application/json'}
 
                     # 1. Define the system prompt for concise, data-driven answers
-                    system_prompt = """You are an expert e-commerce analyst with deep knowledge of Keepa data.
+                    system_prompt_text = """You are an expert e-commerce analyst with deep knowledge of Keepa data.
 - Answer the user's question directly and concisely.
 - When asked for specific data (like price, rank, etc.), provide just that data without conversational filler.
 - Avoid unnecessary explanations.
@@ -118,15 +140,25 @@ if prompt := st.chat_input("Ask me about ASINs, products, or e-commerce strategy
                     history_to_send = st.session_state.messages[-max_history:]
 
                     # Map roles for the Gemini API (user and model)
-                    model_contents = [{"role": "user", "parts": [{"text": system_prompt}]},{"role": "model", "parts": [{"text": "Understood. I will be a direct and concise e-commerce expert."}]}]
+                    model_contents = []
+                    # Add system prompt as the first user message
+                    model_contents.append({"role": "user", "parts": [{"text": system_prompt_text}]})
+                    # Add a few-shot example response from the model
+                    model_contents.append({"role": "model", "parts": [{"text": "Understood. I will be a direct and concise e-commerce expert."}]})
+
                     for msg in history_to_send:
                         role = "model" if msg["role"] == "assistant" else "user"
                         # Ensure we don't add the user's latest prompt twice
-                        if msg["content"] != prompt:
+                        if msg["content"] != prompt: # This check is important to avoid duplicating the current prompt
                             model_contents.append({"role": role, "parts": [{"text": msg["content"]}]})
                     
-                    # Add the current user prompt
-                    model_contents.append({"role": "user", "parts": [{"text": prompt}]})
+                    # Add uploaded file data to the current user prompt if available
+                    current_user_message_text = prompt
+                    if st.session_state.uploaded_file_data:
+                        current_user_message_text += f"\n\nUploaded CSV Data:\n{st.session_state.uploaded_file_data}"
+
+                    # Add the current user prompt (potentially with file data)
+                    model_contents.append({"role": "user", "parts": [{"text": current_user_message_text}]})
 
                     data = {"contents": model_contents}
                     
