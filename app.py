@@ -6,6 +6,7 @@ import time
 from io import StringIO
 import keepa # Added keepa import
 import re # Added re import
+from modules.keepa_modules import KeepaProduct, get_products, get_tokens
 
 st.set_page_config(layout="wide")
 st.title("E-commerce Analysis Agent")
@@ -49,158 +50,95 @@ def convert_time(keepa_time:int) -> pd.Timestamp:
 
 def perform_keepa_analysis(asins):
     all_results = []
-    
-    # Keep track of processed ASINs to avoid duplicates if variations are pulled
     processed_asins = set()
 
-    # Query Keepa API in batches
-    for i in range(0, len(asins), 100): # Keepa API limit is 100 ASINs per request
-        batch = asins[i:i+100]
-        st.info(f"Fetching data for ASIN batch {i//100 + 1}...")
-        
-        try:
-            products = api.query(batch, rating=True, domain=1, stats=90, offers=20) # Added stats and offers
-        except Exception as e:
-            st.error(f"Error querying Keepa API for batch {i//100 + 1}: {e}")
+    # Fetch raw product data using get_products from keepa_modules
+    products_data = get_products(asins)
+
+    if not products_data:
+        st.warning(f"No products data found for the given ASINs.")
+        return pd.DataFrame()
+
+    for asin_item in asins:
+        if asin_item in processed_asins:
             continue
-
-        if not products:
-            st.warning(f"No products found for batch starting with {batch[0]}.")
-            continue
-
-        for product in products:
-            asin = product.get('asin')
-            if not asin or asin in processed_asins:
-                continue
-            processed_asins.add(asin)
-
-            title = product.get('title')
-            brand = product.get('brand')
-            listed_since = convert_time(product.get('listedSince'))
-
-            # Monthly Sales
-            monthly_sales = product.get('monthlySold', -1)
-            monthly_sales_max = sales_tiers.get(monthly_sales, 0) # assess max monthly sales based on sales tiers
-            if monthly_sales == -1:
-                monthly_sales = 0
-            avg_monthly_sales = int(round(monthly_sales * 0.9 + monthly_sales_max * 0.1, 0))
-
-            # Extracting stats for current and average values
-            stats = product.get('stats', {})
-
-            # Amazon Price
-            current_amazon_price = stats.get('amazonPrice', {}).get('current', None) / 100.0 if stats.get('amazonPrice', {}).get('current') is not None else None
-            avg_amazon_price_90 = stats.get('amazonPrice', {}).get('avg', None) / 100.0 if stats.get('amazonPrice', {}).get('avg') is not None else None
-
-            # Buy Box Price
-            current_buybox_price = stats.get('buyBoxPrice', {}).get('current', None) / 100.0 if stats.get('buyBoxPrice', {}).get('current') is not None else None
-            avg_buybox_price_90 = stats.get('buyBoxPrice', {}).get('avg', None) / 100.0 if stats.get('buyBoxPrice', {}).get('avg') is not None else None
-
-            # Sales Rank (BSR)
-            current_bsr = stats.get('salesRank', {}).get('current', None)
-            avg_bsr_90 = stats.get('salesRank', {}).get('avg', None)
-
-            # Amazon OOS percentage (Out of Stock)
-            amazon_oos_90 = stats.get('amazonOOSPercentage', None)
-
-            # Price drop (last 30 days) - Keepa API doesn't directly provide "price drop %" for a period.
-            # This would require analyzing historical data. For now, we'll leave it as N/A or calculate if possible.
-            # This is a complex calculation from raw data, so for now, we'll just note if price has changed.
-            price_drop_30_days = "N/A" # Placeholder, requires more complex history analysis
-
-            # Number of sellers (New, FBA/FBM)
-            # Keepa 'offers' field can give this, but 'stats' also has 'offerCount' for new offers
-            new_offer_count = stats.get('offerCount', {}).get('current', None)
-            # To differentiate FBA/FBM, we'd need to parse the 'offers' array, which is more complex.
-            # For now, let's just get total new offer count.
-            sellers_new_fba_fbm = new_offer_count # Placeholder, needs more detailed parsing of offers
-
-            # Price and Discount (existing logic, might need adjustment based on new price data)
-            price = current_buybox_price if current_buybox_price is not None else (current_amazon_price if current_amazon_price is not None else 0)
-            final_price = price # Simplified for now, as discount logic is complex
-            discount = 0 # Simplified for now
-
-            coupon = product.get('coupon')
-            if coupon:
-                discount_value = coupon[0]
-                if discount_value <= 0: # Negative value means percentage
-                    discount = round(price * abs(discount_value) / 100, 2)
-                else: # Positive value means absolute discount in cents
-                    discount = discount_value / 100.0
-            final_price = price - discount
-
-            # FBA Fees (existing logic)
-            fees = 0
-            try:
-                fees = product.get('fbaFees', {}).get('pickAndPackFee', 0) / 100.0
-            except Exception:
-                fees = 0
-
-            # Reviews and Rating (existing logic)
-            reviews = None
-            try:
-                reviews_data = product.get('data', {}).get('COUNT_REVIEWS', [])
-                if reviews_data:
-                    reviews = reviews_data[-1][1] # Last value
-            except Exception:
-                reviews = None
-
-            rating = None
-            try:
-                rating_data = product.get('data', {}).get('RATING', [])
-                if rating_data:
-                    rating = rating_data[-1][1] / 100.0 # Last value, Keepa rating is * 100
-            except Exception:
-                rating = None
-
-            # Best Sellers Rank (BSR) (existing logic, now using current_bsr and avg_bsr_90)
-            # bsr = None # Removed, now using current_bsr and avg_bsr_90
-            # top_category = product.get('salesRankReference')
-            # if top_category and top_category != -1:
-            #     bsr_history = product.get('salesRanks')
-            #     if bsr_history:
-            #         bsr_list = bsr_history.get(str(top_category), [])
-            #         if bsr_list:
-            #             bsr = bsr_list[-1][1] # Last value
-            
-            parent_asin = product.get('parentAsin')
-            
-            # Image and Product Links
-            images = str(product.get('imagesCSV', '')).split(',')
-            main_image_link = f'https://m.media-amazon.com/images/I/{images[0]}' if images and images[0] else ''
-            product_link = f'https://www.amazon.com/dp/{asin}'
-
-            all_results.append({
-                'ASIN': asin,
-                'Title': title,
-                'Brand': brand,
-                'Listed Since': listed_since,
-                'Min Monthly Sales': monthly_sales,
-                'Max Monthly Sales': monthly_sales_max,
-                'Avg Monthly Sales': avg_monthly_sales,
-                'Current Amazon Price': f"${current_amazon_price:.2f}" if current_amazon_price is not None else 'N/A',
-                'Avg 90-day Amazon Price': f"${avg_amazon_price_90:.2f}" if avg_amazon_price_90 is not None else 'N/A',
-                'Current Buy Box Price': f"${current_buybox_price:.2f}" if current_buybox_price is not None else 'N/A',
-                'Avg 90-day Buy Box Price': f"${avg_buybox_price_90:.2f}" if avg_buybox_price_90 is not None else 'N/A',
-                'Current BSR': current_bsr if current_bsr is not None else 'N/A',
-                'Avg 90-day BSR': avg_bsr_90 if avg_bsr_90 is not None else 'N/A',
-                'Amazon OOS 90-day %': f"{amazon_oos_90}%" if amazon_oos_90 is not None else 'N/A',
-                'Price Drop 30-day %': price_drop_30_days,
-                'New Seller Count': sellers_new_fba_fbm if sellers_new_fba_fbm is not None else 'N/A',
-                'Discount': f"${discount:.2f}",
-                'Final Price': f"${final_price:.2f}",
-                'FBA Fees': f"${fees:.2f}",
-                'Reviews': reviews if reviews is not None else 'N/A',
-                'Rating': rating if rating is not None else 'N/A',
-                'Parent ASIN': parent_asin,
-                'Main Image Link': main_image_link,
-                'Product Link': product_link
-            })
         
-        if i + 100 < len(asins):
-            st.write("Waiting 1 second before next batch to avoid rate limiting...")
-            time.sleep(1) # Small delay to be safe, Keepa library handles rate limits but good practice
+        product = KeepaProduct(asin_item, domain="US") # Assuming US domain for now
+        product.extract_from_products(products_data)
 
+        if not product.exists:
+            st.warning(f"Product data not found for ASIN: {asin_item}")
+            continue
+        
+        processed_asins.add(asin_item)
+
+        # Extract data using KeepaProduct methods
+        title = product.title
+        brand = product.brand
+        listed_since = product.listed_since
+        
+        # Monthly Sales
+        monthly_sales = product.min_sales # Using min_sales from KeepaProduct as a proxy for monthlySold
+        monthly_sales_max = product.max_sales # Using max_sales from KeepaProduct
+        avg_monthly_sales = product.avg_sales
+
+        # Prices
+        current_amazon_price = product.current_amazon_price
+        avg_amazon_price_90 = product.avg_amazon_price
+        current_buybox_price = product.current_full_price # KeepaProduct's full_price is often buybox
+        avg_buybox_price_90 = product.avg_full_price
+
+        # Sales Rank (BSR)
+        current_bsr = product.current_bsr
+        avg_bsr_90 = product.avg_bsr
+
+        # Amazon OOS percentage (KeepaProduct doesn't directly expose this, need to check raw data if available)
+        amazon_oos_90 = "N/A" # Placeholder for now, as KeepaProduct doesn't directly expose
+
+        price_drop_30_days = "N/A" # KeepaProduct doesn't directly expose this
+
+        new_offer_count = product.new_offer_count
+        sellers_new_fba_fbm = new_offer_count
+
+        discount = product.coupon_amount
+        final_price = product.final_price
+
+        fees = product.fba_fees
+
+        reviews = product.reviews
+        rating = product.rating
+
+        parent_asin = product.parent_asin
+        main_image_link = product.image
+        product_link = f'https://www.amazon.com/dp/{asin_item}'
+
+        all_results.append({
+            'ASIN': asin_item,
+            'Title': title,
+            'Brand': brand,
+            'Listed Since': listed_since,
+            'Min Monthly Sales': monthly_sales,
+            'Max Monthly Sales': monthly_sales_max,
+            'Avg Monthly Sales': avg_monthly_sales,
+            'Current Amazon Price': f"${current_amazon_price:.2f}" if current_amazon_price is not None else 'N/A',
+            'Avg 90-day Amazon Price': f"${avg_amazon_price_90:.2f}" if avg_amazon_price_90 is not None else 'N/A',
+            'Current Buy Box Price': f"${current_buybox_price:.2f}" if current_buybox_price is not None else 'N/A',
+            'Avg 90-day Buy Box Price': f"${avg_buybox_price_90:.2f}" if avg_buybox_price_90 is not None else 'N/A',
+            'Current BSR': current_bsr if current_bsr is not None else 'N/A',
+            'Avg 90-day BSR': avg_bsr_90 if avg_bsr_90 is not None else 'N/A',
+            'Amazon OOS 90-day %': amazon_oos_90,
+            'Price Drop 30-day %': price_drop_30_days,
+            'New Seller Count': sellers_new_fba_fbm if sellers_new_fba_fbm is not None else 'N/A',
+            'Discount': f"${discount:.2f}",
+            'Final Price': f"${final_price:.2f}",
+            'FBA Fees': f"${fees:.2f}",
+            'Reviews': reviews if reviews is not None else 'N/A',
+            'Rating': rating if rating is not None else 'N/A',
+            'Parent ASIN': parent_asin,
+            'Main Image Link': main_image_link,
+            'Product Link': product_link
+        })
+    
     return pd.DataFrame(all_results)
 
 def get_bestsellers(category_id: str, domain_id: int, sales_range: int = 0):
