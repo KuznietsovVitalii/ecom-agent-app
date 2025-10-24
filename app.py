@@ -6,7 +6,6 @@ import time
 from io import StringIO
 import keepa # Added keepa import
 import re # Added re import
-from modules.keepa_modules import KeepaProduct, get_products, get_tokens
 
 st.set_page_config(layout="wide")
 st.title("E-commerce Analysis Agent")
@@ -97,14 +96,31 @@ def get_asin_title_direct(asin, api_client):
         avg_monthly_sales = product.avg_sales
 
         # Prices
-        current_amazon_price = product.current_amazon_price
-        avg_amazon_price_90 = product.avg_amazon_price
-        current_buybox_price = product.current_full_price # KeepaProduct's full_price is often buybox
-        avg_buybox_price_90 = product.avg_full_price
+        # Use raw product data for more accurate parsing as KeepaProduct might abstract too much
+        raw_product_data = [p for p in products_data if p.get('asin') == asin_item]
+        stats = raw_product_data[0].get('stats', {}) if raw_product_data else {}
+
+        current_buybox_price = stats.get('buyBoxPrice', -1)
+        if current_buybox_price != -1:
+            current_buybox_price /= 100.0
+        else:
+            current_buybox_price = None
+
+        # For avg_buybox_price_90, we need to check stats['avg'] list
+        avg_buybox_price_90 = stats.get('avg', [])[1] if len(stats.get('avg', [])) > 1 else -1
+        if avg_buybox_price_90 != -1:
+            avg_buybox_price_90 /= 100.0
+        else:
+            avg_buybox_price_90 = None
+
+        # Amazon Price - often not directly available as 'amazonPrice' dict in stats
+        # We'll try to get it from the 'current' and 'avg' lists if possible, or use buybox as fallback
+        current_amazon_price = None # Placeholder, needs more specific parsing if required
+        avg_amazon_price_90 = None # Placeholder, needs more specific parsing if required
 
         # Sales Rank (BSR)
-        current_bsr = product.current_bsr
-        avg_bsr_90 = product.avg_bsr
+        current_bsr = stats.get('current', [])[2] if len(stats.get('current', [])) > 2 else None
+        avg_bsr_90 = stats.get('avg', [])[2] if len(stats.get('avg', [])) > 2 else None
 
         # Amazon OOS percentage (KeepaProduct doesn't directly expose this, need to check raw data if available)
         amazon_oos_90 = "N/A" # Placeholder for now, as KeepaProduct doesn't directly expose
