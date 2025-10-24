@@ -338,7 +338,7 @@ if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce stra
             else:
                 # Default to Gemini for general queries
                 try:
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={GEMINI_API_KEY}"
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
                     headers = {'Content-Type': 'application/json'}
 
                     # 1. Define the system prompt for concise, data-driven answers
