@@ -4,8 +4,8 @@ import requests
 import json
 import time
 from io import StringIO
+import keepa
 import re # Added re import
-import requests # Ensure requests is imported
 
 st.set_page_config(layout="wide")
 st.title("E-commerce Analysis Agent")
