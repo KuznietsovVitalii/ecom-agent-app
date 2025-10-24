@@ -222,6 +222,25 @@ def get_bestsellers(category_id: str, domain_id: int, sales_range: int = 0):
         st.error(f"Error fetching bestsellers from Keepa API: {e}")
         return []
 
+def get_deals(query_json: dict):
+    """
+    Retrieves deals from Keepa based on a query JSON.
+    """
+    try:
+        # Keepa API for deals uses a POST request with queryJSON in the payload
+        # The keepa library handles the URL encoding for GET or payload for POST
+        deals_data = api.query_deals(query_json)
+        
+        if deals_data and 'dr' in deals_data:
+            # 'dr' contains a list of deal objects
+            return deals_data['dr']
+        else:
+            st.warning(f"No deals found for the specified criteria.")
+            return []
+    except Exception as e:
+        st.error(f"Error fetching deals from Keepa API: {e}")
+        return []
+
 # --- Chat with Agent ---
 st.header("Chat with Keepa Expert Agent")
 st.info("Ask the AI agent anything about e-commerce and Keepa data.")
@@ -328,6 +347,38 @@ if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce stra
                         message_placeholder.error("Could not retrieve detailed data for the top best-selling ASINs.")
                 else:
                     message_placeholder.warning("Could not find best sellers for the specified criteria. Please try a different category or refine your request.")
+            elif "deals" in prompt.lower() or "price drops" in prompt.lower() or "discounts" in prompt.lower():
+                # Simplified deal query for now. Needs robust parsing of user intent.
+                # Default to a simple query for price drops in US, last 24 hours, new FBA price
+                deal_query_json = {
+                    "page": 0,
+                    "domainId": 1, # US
+                    "priceTypes": [10], # New FBA price
+                    "dateRange": 0, # Last 24 hours
+                    "deltaPercentRange": [10, -1], # At least 10% drop
+                    "isFilterEnabled": True,
+                    "sortType": 4 # Sort by percentage delta
+                }
+                message_placeholder.info("Fetching deals with significant price drops...")
+                deals = get_deals(deal_query_json)
+
+                if deals:
+                    message_placeholder.success(f"Found {len(deals)} deals. Analyzing the top 5...")
+                    # Extract ASINs from deals
+                    deal_asins = [deal.get('asin') for deal in deals if deal.get('asin')]
+                    if deal_asins:
+                        top_deals_df = perform_keepa_analysis(deal_asins[:5]) # Analyze top 5 deals
+                        if not top_deals_df.empty:
+                            st.session_state.messages.append({"role": "assistant", "content": "Here is a detailed analysis of the top 5 deals:"})
+                            st.session_state.messages.append({"role": "assistant", "content": top_deals_df.to_markdown(index=False)})
+                            st.session_state.keepa_analysis_data = top_deals_df.to_json(orient="records", indent=2)
+                            st.rerun()
+                        else:
+                            message_placeholder.error("Could not retrieve detailed data for the top deals.")
+                    else:
+                        message_placeholder.error("No ASINs found in the fetched deals.")
+                else:
+                    message_placeholder.warning("Could not find any deals for the specified criteria. Try refining your request.")
             else:
                 # Default to Gemini for general queries
                 try:
