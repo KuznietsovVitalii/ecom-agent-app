@@ -162,10 +162,10 @@ if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce stra
                     # Add uploaded file data to the current user prompt if available
                     current_user_message_text = prompt # This 'prompt' is the text part from prompt_obj
                     if st.session_state.uploaded_file_data:
-                        current_user_message_text += f"
+                        current_user_message_text += f"""
 
 Uploaded CSV Data:
-{st.session_state.uploaded_file_data}"
+{st.session_state.uploaded_file_data}"""
 
                     # Add the current user prompt (potentially with file data)
                     model_contents.append({"role": "user", "parts": [{"text": current_user_message_text}]})
