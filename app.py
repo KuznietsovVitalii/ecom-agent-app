@@ -51,34 +51,22 @@ def perform_keepa_analysis(asins, api_client):
     all_results = []
     processed_asins = set()
 
-def get_asin_title_direct(asin, api_client):
-    try:
-        products = api_client.query(asin, domain=1) # domain=1 for US
-        if products and products[0]:
-            return products[0].get('title', 'Title not found')
-        return 'No product found'
-    except Exception as e:
-        return f"Error fetching title: {e}"
-    processed_asins = set()
-
     # Fetch raw product data using get_products from keepa_modules
     products_data = get_products(asins, api_client=api_client)
+    st.info(f"Raw products_data received: {products_data}")
 
     if not products_data:
         st.warning(f"No products data found for the given ASINs.")
         return pd.DataFrame()
 
     for asin_item in asins:
-        st.info(f"Processing ASIN: {asin_item}")
         if asin_item in processed_asins:
-            st.info(f"ASIN {asin_item} already processed, skipping.")
             continue
         
         product = KeepaProduct(asin_item, domain="US", api_client=api_client) # Assuming US domain for now
         product.extract_from_products(products_data)
         product.get_last_days(days=90) # Call this to populate sales and price data
 
-        st.info(f"Product exists for {asin_item}: {product.exists}")
         if not product.exists:
             st.warning(f"Product data not found for ASIN: {asin_item}")
             continue
@@ -277,11 +265,6 @@ if prompt_obj := st.chat_input("Ask me about ASINs, products, or e-commerce stra
                 if asins_in_prompt:
                     message_placeholder.info(f"Found ASINs: {', '.join(asins_in_prompt)}. Fetching detailed data from Keepa...")
                     
-                    # Get and display title directly for debugging
-                    for asin_to_check in asins_in_prompt:
-                        direct_title = get_asin_title_direct(asin_to_check, api)
-                        message_placeholder.write(f"Direct Title for {asin_to_check}: {direct_title}")
-
                     # Call the new advanced analysis function
                     keepa_df = perform_keepa_analysis(asins_in_ins_in_prompt, api)
                     
