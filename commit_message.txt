@@ -1,0 +1,1 @@
+fix: SyntaxError - unmatched '}' in error message append
