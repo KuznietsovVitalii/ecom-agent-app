@@ -5,99 +5,72 @@ import json
 import io
 import PyPDF2
 from google.oauth2.service_account import Credentials
-from google.cloud import bigquery
+
 
 import uuid
 
 
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v5 (BigQuery Memory)")
+st.title("E-commerce Analysis Agent v6 (JSONBin.io Memory)")
 
-# --- BigQuery Persistence ---
-BIGQUERY_PROJECT_ID = st.secrets["GCP_PROJECT_ID"] # Use the same project ID from secrets
-BIGQUERY_DATASET_ID = "ecom_agent_dataset"
-BIGQUERY_TABLE_ID = "chat_history"
+# --- JSONBin.io Persistence ---
+JSONBIN_BASE_URL = "https://api.jsonbin.io/v3/b/"
+JSONBIN_BIN_ID = "68ff7d7aae596e708f3075c3" # User provided bin ID
 
-@st.cache_resource
-def get_bigquery_client():
-    """Connects to BigQuery using service account credentials."""
+def load_history_from_jsonbin(session_id, api_key, bin_id):
+    """Loads chat history for a given session_id from JSONBin.io."""
+    headers = {
+        "X-Master-Key": api_key,
+        "X-Bin-Meta": "false"
+    }
     try:
-        creds_dict = {
-            "type": "service_account",
-            "project_id": GCP_PROJECT_ID,
-            "private_key_id": "72121b20078a955bd2ff628a3184d5e7e66275de",
-            "private_key": GCP_PRIVATE_KEY,
-            "client_email": GCP_CLIENT_EMAIL,
-            "client_id": "100512556019710416916",
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{GCP_CLIENT_EMAIL.replace('@', '%40')}"
-        }
-        credentials = Credentials.from_service_account_info(creds_dict)
-        client = bigquery.Client(project=BIGQUERY_PROJECT_ID, credentials=credentials)
-        return client
-    except Exception as e:
-        st.error(f"Failed to connect to BigQuery: {e}")
-        st.stop()
-
-def load_history_from_bigquery(client, session_id):
-    """Loads chat history for a given session_id from BigQuery."""
-    try:
-        query = f"""
-            SELECT role, content, timestamp
-            FROM `{BIGQUERY_PROJECT_ID}.{BIGQUERY_DATASET_ID}.{BIGQUERY_TABLE_ID}`
-            WHERE session_id = @session_id
-            ORDER BY timestamp
-        """
-        job_config = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("session_id", "STRING", session_id),
-        ])
-        query_job = client.query(query, job_config=job_config)
-        rows = query_job.result()
-
-        history = []
-        for row in rows:
-            history.append({"role": row.role, "content": row.content})
-        return history
-    except Exception as e:
-        st.error(f"CRITICAL ERROR loading history from BigQuery: {e}")
+        response = requests.get(f"{JSONBIN_BASE_URL}{bin_id}", headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        
+        # JSONBin.io stores the whole bin content. We need to filter by session_id.
+        # The bin is expected to be a dict like {"sessions": {"session_id_1": [...], "session_id_2": [...]}}
+        if "sessions" in data and session_id in data["sessions"]:
+            return data["sessions"][session_id]
+        else:
+            return []
+    except requests.exceptions.RequestException as e:
+        st.error(f"CRITICAL ERROR loading history from JSONBin.io: {e}")
+        return []
+    except json.JSONDecodeError:
+        st.error("CRITICAL ERROR: Invalid JSON received from JSONBin.io.")
         return []
 
-def save_history_to_bigquery(client, session_id, history):
-    """Saves the entire current chat history for a session to BigQuery.
-    This implementation overwrites previous history for simplicity.
-    A more robust solution would append new messages.
+def save_history_to_jsonbin(session_id, history, api_key, bin_id):
+    """Saves the entire current chat history for a session to JSONBin.io.
+    This updates the specific session's history within the bin.
     """
+    headers = {
+        "Content-Type": "application/json",
+        "X-Master-Key": api_key,
+        "X-Bin-Meta": "false"
+    }
     try:
-        # For simplicity, we'll delete existing history for this session and re-insert.
-        # A more efficient approach would be to only insert new messages.
-        delete_query = f"""
-            DELETE FROM `{BIGQUERY_PROJECT_ID}.{BIGQUERY_DATASET_ID}.{BIGQUERY_TABLE_ID}`
-            WHERE session_id = @session_id
-        """
-        job_config_delete = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("session_id", "STRING", session_id),
-        ])
-        delete_job = client.query(delete_query, job_config=job_config_delete)
-        delete_job.result() # Wait for deletion to complete
+        # First, get the current bin content to update it
+        response = requests.get(f"{JSONBIN_BASE_URL}{bin_id}", headers=headers)
+        response.raise_for_status()
+        current_data = response.json()
 
-        rows_to_insert = []
-        for msg in history:
-            rows_to_insert.append({
-                "session_id": session_id,
-                "timestamp": datetime.utcnow().isoformat(),
-                "role": msg["role"],
-                "content": msg["content"]
-            })
+        if "sessions" not in current_data:
+            current_data["sessions"] = {}
         
-        if rows_to_insert:
-            errors = client.insert_rows_json(f"{BIGQUERY_PROJECT_ID}.{BIGQUERY_DATASET_ID}.{BIGQUERY_TABLE_ID}", rows_to_insert)
-            if errors:
-                st.error(f"ERROR saving history to BigQuery: {errors}")
+        current_data["sessions"][session_id] = history
 
-    except Exception as e:
-        st.error(f"CRITICAL ERROR saving history to BigQuery: {e}")
+        # Now, update the bin with the modified data
+        update_response = requests.put(f"{JSONBIN_BASE_URL}{bin_id}", headers=headers, json=current_data)
+        update_response.raise_for_status()
+
+    except requests.exceptions.RequestException as e:
+        st.error(f"CRITICAL ERROR saving history to JSONBin.io: {e}")
+    except json.JSONDecodeError:
+        st.error("CRITICAL ERROR: Invalid JSON received from JSONBin.io during update.")
+
+
 
 # --- Generate unique session ID for privacy ---
 if "session_id" not in st.session_state:
@@ -112,12 +85,10 @@ try:
     GCP_CLIENT_EMAIL = st.secrets["GCP_CLIENT_EMAIL"]
     GCP_PRIVATE_KEY = st.secrets["GCP_PRIVATE_KEY"]
 except KeyError as e:
-    st.error(f"A required secret is missing: {e}. Please check your Streamlit Cloud secrets and ensure you have added GCP_PROJECT_ID, GCP_CLIENT_EMAIL, and GCP_PRIVATE_KEY.")
+    st.error(f"A required secret is missing: {e}. Please check your Streamlit Cloud secrets and ensure you have added GEMINI_API_KEY, KEEPA_API_KEY, GCP_PROJECT_ID, GCP_CLIENT_EMAIL, and GCP_PRIVATE_KEY.")
     st.stop()
 
-# --- Google Sheets Persistence ---
-SHEET_NAME = "ecom_agent_chat_history"
-WORKSHEET_NAME = f"history_log_{st.session_state.session_id}"
+
 
 
 
@@ -191,12 +162,9 @@ with tab2:
 
     st.info("Your conversation is now saved automatically.")
 
-    # Initialize Gspread client and worksheet
-    bq_client = get_bigquery_client()
-
     # Initialize chat history
     if "messages" not in st.session_state:
-        st.session_state.messages = load_history_from_bigquery(bq_client, st.session_state.session_id)
+        st.session_state.messages = load_history_from_bigquery(get_bigquery_client(), st.session_state.session_id)
 
     # Display chat messages
     for message in st.session_state.messages:
