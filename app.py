@@ -150,7 +150,7 @@ with tab1:
 with tab2:
     st.header("Chat with Keepa Expert Agent")
 
-    if st.button("Очистить чат"):
+    if st.button("Clear Chat"):
         st.session_state.messages = []
         # Also clear the persisted history
         client = get_gspread_client()
