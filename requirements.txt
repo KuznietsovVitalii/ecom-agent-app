@@ -3,3 +3,4 @@ requests
 pandas
 gspread
 google-auth-oauthlib
+PyPDF2
