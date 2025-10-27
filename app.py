@@ -65,8 +65,13 @@ def load_history_from_sheet(worksheet):
     """Loads chat history from a cell in the worksheet."""
     try:
         history_json = worksheet.acell('A1').value
-        return json.loads(history_json or '[]')
-    except (json.JSONDecodeError, TypeError):
+        if history_json is None:
+            # First time use, cell is empty. Initialize it.
+            worksheet.update_acell('A1', '[]')
+            return []
+        return json.loads(history_json)
+    except Exception as e:
+        st.error(f"ERROR loading history: {e}")
         return []
 
 def save_history_to_sheet(worksheet, history):
@@ -74,7 +79,7 @@ def save_history_to_sheet(worksheet, history):
     try:
         worksheet.update_acell('A1', json.dumps(history, indent=2))
     except Exception as e:
-        st.warning(f"Could not save history to Google Sheets: {e}")
+        st.error(f"ERROR saving history: {e}")
 
 # --- Keepa API Logic ---
 KEEPA_BASE_URL = 'https://api.keepa.com'
