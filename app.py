@@ -166,7 +166,6 @@ with tab2:
 - Answer concisely. 
 - When Keepa data is provided in the user's prompt, use it as the primary source for your analysis.
 - Do not invent data. If the user asks a question that cannot be answered with the provided data, state that the information is missing.'''}]}
-                    }
 
                     api_history = []
                     for msg in st.session_state.messages:
