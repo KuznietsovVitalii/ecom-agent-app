@@ -47,11 +47,12 @@ def get_gspread_client():
         st.stop()
 
 def get_worksheet(client):
-    """Gets or creates the specific worksheet for storing history."""
+    """Gets the specific worksheet, assuming the spreadsheet is pre-created and shared."""
     try:
         spreadsheet = client.open(SHEET_NAME)
     except gspread.exceptions.SpreadsheetNotFound:
-        spreadsheet = client.create(SHEET_NAME)
+        st.error(f"Spreadsheet named '{SHEET_NAME}' not found. Please create it manually and share it with the service account email.")
+        st.stop()
     
     try:
         worksheet = spreadsheet.worksheet(WORKSHEET_NAME)
