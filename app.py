@@ -12,7 +12,7 @@ st.set_page_config(layout="wide")
 st.title("E-commerce Analysis Agent v5 (BigQuery Memory)")
 
 # --- BigQuery Persistence ---
-BIGQUERY_PROJECT_ID = GCP_PROJECT_ID # Use the same project ID from secrets
+BIGQUERY_PROJECT_ID = st.secrets["GCP_PROJECT_ID"] # Use the same project ID from secrets
 BIGQUERY_DATASET_ID = "ecom_agent_dataset"
 BIGQUERY_TABLE_ID = "chat_history"
 
