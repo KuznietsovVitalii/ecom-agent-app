@@ -6,37 +6,44 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v3 (with Memory)")
+st.title("E-commerce Analysis Agent v4 (with Memory Fix)")
 
 # --- API Key Management ---
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     KEEPA_API_KEY = st.secrets["KEEPA_API_KEY"]
-    # Load the GCP credentials from the TOML format
-    gcp_creds_dict = json.loads(st.secrets["GCP_CREDS"])
-except (FileNotFoundError, KeyError, json.JSONDecodeError) as e:
-    st.error(f"An error occurred with your secret keys: {e}")
-    st.info('''
-        Please ensure you have the following secrets in your Streamlit Cloud settings in TOML format:
-        1.  `GEMINI_API_KEY = "your_gemini_key"`
-        2.  `KEEPA_API_KEY = "your_keepa_key"`
-        3.  `GCP_CREDS = """{\'type\': \'service_account\', ...}"""`
-    ''')
+    GCP_PROJECT_ID = st.secrets["GCP_PROJECT_ID"]
+    GCP_CLIENT_EMAIL = st.secrets["GCP_CLIENT_EMAIL"]
+    GCP_PRIVATE_KEY = st.secrets["GCP_PRIVATE_KEY"]
+except KeyError as e:
+    st.error(f"A required secret is missing: {e}. Please check your Streamlit Cloud secrets and ensure you have added GCP_PROJECT_ID, GCP_CLIENT_EMAIL, and GCP_PRIVATE_KEY.")
     st.stop()
 
 # --- Google Sheets Persistence ---
-SHEET_NAME = "ecom_agent_chat_history" # The name of the Google Sheet file
-WORKSHEET_NAME = "history_log" # The name of the worksheet (tab) inside the file
+SHEET_NAME = "ecom_agent_chat_history"
+WORKSHEET_NAME = "history_log"
 
 @st.cache_resource
 def get_gspread_client():
-    """Connects to Google Sheets using service account credentials."""
+    """Connects to Google Sheets using service account credentials built from individual secrets."""
     try:
-        creds = Credentials.from_service_account_info(gcp_creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+        creds_dict = {
+            "type": "service_account",
+            "project_id": GCP_PROJECT_ID,
+            "private_key_id": "72121b20078a955bd2ff628a3184d5e7e66275de",
+            "private_key": GCP_PRIVATE_KEY,
+            "client_email": GCP_CLIENT_EMAIL,
+            "client_id": "100512556019710416916",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{GCP_CLIENT_EMAIL.replace('@', '%40')}"
+        }
+        creds = Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets"])
         client = gspread.authorize(creds)
         return client
     except Exception as e:
-        st.error(f"Failed to connect to Google Sheets: {e}")
+        st.error(f"Failed to connect to Google Sheets. Please ensure your GCP secrets are correct. Error: {e}")
         st.stop()
 
 def get_worksheet(client):
@@ -45,15 +52,12 @@ def get_worksheet(client):
         spreadsheet = client.open(SHEET_NAME)
     except gspread.exceptions.SpreadsheetNotFound:
         spreadsheet = client.create(SHEET_NAME)
-        # Share with the user's email if you want them to see it easily
-        # You can manually add your own email here for convenience
-        # spreadsheet.share('your-email@gmail.com', perm_type='user', role='writer')
     
     try:
         worksheet = spreadsheet.worksheet(WORKSHEET_NAME)
     except gspread.exceptions.WorksheetNotFound:
         worksheet = spreadsheet.add_worksheet(title=WORKSHEET_NAME, rows="100", cols="1")
-        worksheet.update_acell('A1', '[]') # Initialize with empty JSON array
+        worksheet.update_acell('A1', '[]')
     return worksheet
 
 def load_history_from_sheet(worksheet):
@@ -62,7 +66,7 @@ def load_history_from_sheet(worksheet):
         history_json = worksheet.acell('A1').value
         return json.loads(history_json or '[]')
     except (json.JSONDecodeError, TypeError):
-        return [] # Return empty list if cell is empty or corrupt
+        return []
 
 def save_history_to_sheet(worksheet, history):
     """Saves chat history as a JSON string to a cell."""
@@ -71,11 +75,10 @@ def save_history_to_sheet(worksheet, history):
     except Exception as e:
         st.warning(f"Could not save history to Google Sheets: {e}")
 
-# --- Keepa API Logic (Ported from keepa_mcp_server) ---
+# --- Keepa API Logic ---
 KEEPA_BASE_URL = 'https://api.keepa.com'
 
 def get_token_status(api_key):
-    """Checks the remaining Keepa API tokens."""
     try:
         response = requests.get(f"{KEEPA_BASE_URL}/token", params={'key': api_key})
         response.raise_for_status()
@@ -84,7 +87,6 @@ def get_token_status(api_key):
         return {"error": str(e)}
 
 def get_product_info(api_key, asins, domain_id=1):
-    """Looks up detailed product information by ASINs."""
     if isinstance(asins, str):
         asins = [asin.strip() for asin in asins.split(',')]
     
@@ -135,20 +137,16 @@ with tab2:
     st.header("Chat with Keepa Expert Agent")
     st.info("Your conversation is now saved automatically.")
 
-    # Initialize Gspread client and worksheet
     client = get_gspread_client()
     worksheet = get_worksheet(client)
 
-    # Initialize chat history from Google Sheet
     if "messages" not in st.session_state:
         st.session_state.messages = load_history_from_sheet(worksheet)
 
-    # Display chat messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Accept user input
     if prompt := st.chat_input("Ask for analysis on the data you fetched..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
@@ -167,7 +165,7 @@ with tab2:
 - You have a persistent memory. Acknowledge previous conversations if relevant.
 - Answer concisely. 
 - When Keepa data is provided in the user's prompt, use it as the primary source for your analysis.
-- Do not invent data. If the user asks a question that cannot be answered with the provided data, state that the information is missing.'''}]
+- Do not invent data. If the user asks a question that cannot be answered with the provided data, state that the information is missing.'''}]}
                     }
 
                     api_history = []
