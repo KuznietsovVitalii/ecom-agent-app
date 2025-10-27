@@ -5,6 +5,7 @@ import json
 import io
 import PyPDF2
 from google.oauth2.service_account import Credentials
+from google.cloud import bigquery
 
 import uuid
 
