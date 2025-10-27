@@ -62,16 +62,24 @@ def get_worksheet(client):
     return worksheet
 
 def load_history_from_sheet(worksheet):
-    """Loads chat history from a cell in the worksheet."""
+    """Loads chat history from a cell in the worksheet with extra debugging."""
     try:
+        st.info("Attempting to load history from sheet...")
         history_json = worksheet.acell('A1').value
-        if history_json is None:
-            # First time use, cell is empty. Initialize it.
+        st.info(f"Type of data from sheet: {type(history_json)}")
+        st.text_area("Raw data from sheet", str(history_json), height=100)
+
+        if not history_json or history_json.strip() == "":
+            st.warning("Sheet cell is empty. Initializing.")
             worksheet.update_acell('A1', '[]')
             return []
-        return json.loads(history_json)
+        
+        st.success("Data loaded from sheet. Attempting to parse JSON...")
+        history = json.loads(history_json)
+        st.success("JSON parsed successfully!")
+        return history
     except Exception as e:
-        st.error(f"ERROR loading history: {e}")
+        st.error(f"CRITICAL ERROR loading history: {e}")
         return []
 
 def save_history_to_sheet(worksheet, history):
