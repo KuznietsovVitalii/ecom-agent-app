@@ -4,6 +4,7 @@ import pandas as pd
 import json
 import io
 import PyPDF2
+from google.oauth2.service_account import Credentials
 
 import uuid
 
