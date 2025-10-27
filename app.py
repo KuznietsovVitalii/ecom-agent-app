@@ -8,6 +8,26 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(layout="wide")
+
+# --- Custom CSS to pin chat input to the bottom ---
+st.markdown("""
+<style>
+    .stChatInputContainer {
+        position: fixed;
+        bottom: 0;
+        width: 100%;
+        background-color: #0e1117; /* Match Streamlit's dark theme background */
+        padding: 10px 1rem 10px 1rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        z-index: 999;
+    }
+    /* Add padding to the bottom of the main container to avoid overlap */
+    .main .block-container {
+        padding-bottom: 6rem; 
+    }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("E-commerce Analysis Agent v4 (with Memory Fix)")
 
 # --- API Key Management ---
