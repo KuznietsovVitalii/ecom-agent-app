@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 import pandas as pd
 import json
+import io
+import PyPDF2
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -150,6 +152,11 @@ with tab1:
 with tab2:
     st.header("Chat with Keepa Expert Agent")
 
+    uploaded_files = st.file_uploader(
+        "Прикрепите файлы для анализа (txt, pdf, csv...)",
+        accept_multiple_files=True
+    )
+
     if st.button("Очистить чат"):
         st.session_state.messages = []
         # Also clear the persisted history
@@ -183,17 +190,39 @@ with tab2:
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
                     headers = {'Content-Type': 'application/json'}
 
+                    # --- File Processing Logic ---
+                    file_context = ""
+                    if uploaded_files:
+                        st.info(f"Processing {len(uploaded_files)} uploaded file(s)...")
+                        for uploaded_file in uploaded_files:
+                            try:
+                                file_context += f"--- Content from {uploaded_file.name} ---\n"
+                                if uploaded_file.type == "application/pdf":
+                                    pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.getvalue()))
+                                    for page in pdf_reader.pages:
+                                        file_context += page.extract_text() + "\n"
+                                else: # Assume text-based
+                                    file_context += uploaded_file.getvalue().decode('utf-8') + "\n"
+                                file_context += f"--- End of {uploaded_file.name} ---\n\n"
+                            except Exception as e:
+                                st.error(f"Error processing file {uploaded_file.name}: {e}")
+                    # --- End of File Processing ---
+
                     system_instruction = {
                         "parts": [{"text": '''You are an expert e-commerce analyst specializing in Keepa data. 
 - You have a persistent memory. Acknowledge previous conversations if relevant.
 - Answer concisely. 
-- When Keepa data is provided in the user's prompt, use it as the primary source for your analysis.
+- When context from Keepa data or attached files is provided, use it as the primary source for your analysis.
 - Do not invent data. If the user asks a question that cannot be answered with the provided data, state that the information is missing.'''}]}
 
                     api_history = []
                     for msg in st.session_state.messages:
                         role = "model" if msg["role"] == "assistant" else "user"
                         api_history.append({"role": role, "parts": [{"text": msg["content"]}]})
+
+                    # Inject file context into the last user message
+                    if file_context:
+                        api_history[-1]['parts'][0]['text'] = f"CONTEXT FROM ATTACHED FILES:\n{file_context}\n\nUSER PROMPT: {api_history[-1]['parts'][0]['text']}"
 
                     if "keepa_data" in st.session_state and st.session_state.keepa_data:
                         context_data = json.dumps(st.session_state.keepa_data, indent=2)
