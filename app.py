@@ -152,11 +152,6 @@ with tab1:
 with tab2:
     st.header("Chat with Keepa Expert Agent")
 
-    uploaded_files = st.file_uploader(
-        "Прикрепите файлы для анализа (txt, pdf, csv...)",
-        accept_multiple_files=True
-    )
-
     if st.button("Очистить чат"):
         st.session_state.messages = []
         # Also clear the persisted history
@@ -167,20 +162,34 @@ with tab2:
 
     st.info("Your conversation is now saved automatically.")
 
+    # Initialize Gspread client and worksheet
     client = get_gspread_client()
     worksheet = get_worksheet(client)
 
+    # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = load_history_from_sheet(worksheet)
 
+    # Display chat messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Input chat..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    # New integrated chat input
+    prompt = st.chat_input(
+        "Input chat...", 
+        accept_file=True, 
+        file_type=["txt", "pdf", "csv", "json", "md"]
+    )
+
+    if prompt:
+        user_prompt_text = prompt.text if prompt.text else " " # Use a space if no text
+        st.session_state.messages.append({"role": "user", "content": user_prompt_text})
         with st.chat_message("user"):
-            st.markdown(prompt)
+            if prompt.text:
+                st.markdown(prompt.text)
+            if prompt.files:
+                st.markdown(f"_{len(prompt.files)} file(s) attached for analysis._")
 
         with st.chat_message("assistant"):
             with st.spinner("Agent is thinking..."):
@@ -192,9 +201,9 @@ with tab2:
 
                     # --- File Processing Logic ---
                     file_context = ""
-                    if uploaded_files:
-                        st.info(f"Processing {len(uploaded_files)} uploaded file(s)...")
-                        for uploaded_file in uploaded_files:
+                    if prompt.files:
+                        st.info(f"Processing {len(prompt.files)} uploaded file(s)...")
+                        for uploaded_file in prompt.files:
                             try:
                                 file_context += f"--- Content from {uploaded_file.name} ---\n"
                                 if uploaded_file.type == "application/pdf":
