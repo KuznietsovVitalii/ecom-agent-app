@@ -4,4 +4,3 @@ pandas
 gspread
 google-auth-oauthlib
 PyPDF2
-google-cloud-bigquery
