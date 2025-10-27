@@ -149,6 +149,15 @@ with tab1:
 
 with tab2:
     st.header("Chat with Keepa Expert Agent")
+
+    if st.button("Очистить чат"):
+        st.session_state.messages = []
+        # Also clear the persisted history
+        client = get_gspread_client()
+        worksheet = get_worksheet(client)
+        save_history_to_sheet(worksheet, [])
+        st.rerun()
+
     st.info("Your conversation is now saved automatically.")
 
     client = get_gspread_client()
@@ -161,7 +170,7 @@ with tab2:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ask for analysis on the data you fetched..."):
+    if prompt := st.chat_input("Input chat..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
