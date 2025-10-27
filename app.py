@@ -5,34 +5,16 @@ import json
 import io
 import PyPDF2
 import gspread
+import uuid
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(layout="wide")
-
-# --- Custom CSS for chat UI ---
-st.markdown("""
-<style>
-    /* Container for scrolling messages */
-    #message-container {
-        height: 70vh; /* 70% of the viewport height */
-        overflow-y: auto;
-        padding: 1rem;
-        margin-bottom: 5rem; /* Space for the chat input */
-    }
-    /* Pinned chat input */
-    .stChatInputContainer {
-        position: fixed;
-        bottom: 0;
-        width: 100%;
-        background-color: #0e1117;
-        padding: 10px 1rem;
-        border-top: 1px solid rgba(255, 255, 255, 0.2);
-        z-index: 999;
-    }
-</style>
-""", unsafe_allow_html=True)
-
 st.title("E-commerce Analysis Agent v4 (with Memory Fix)")
+
+# --- Generate unique session ID for privacy ---
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+st.info(f"Your session ID: {st.session_state.session_id}") # For debugging
 
 # --- API Key Management ---
 try:
@@ -47,7 +29,7 @@ except KeyError as e:
 
 # --- Google Sheets Persistence ---
 SHEET_NAME = "ecom_agent_chat_history"
-WORKSHEET_NAME = "history_log"
+WORKSHEET_NAME = f"history_log_{st.session_state.session_id}"
 
 @st.cache_resource
 def get_gspread_client():
@@ -195,11 +177,9 @@ with tab2:
         st.session_state.messages = load_history_from_sheet(worksheet)
 
     # Display chat messages
-    st.markdown('<div id="message-container">', unsafe_allow_html=True)
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-    st.markdown('</div>', unsafe_allow_html=True)
 
     # New integrated chat input
     prompt = st.chat_input(
