@@ -153,21 +153,19 @@ with tab1:
 with tab2:
     st.header("Chat with Keepa Expert Agent")
 
-    # Initialize BigQuery client once for the tab
-    bq_client = get_bigquery_client()
+    
 
     if st.button("Clear Chat"):
         st.session_state.messages = []
         # Also clear the persisted history
-        bq_client = get_bigquery_client()
-        save_history_to_bigquery(bq_client, st.session_state.session_id, []) # Clear BigQuery history
+        save_history_to_jsonbin(st.session_state.session_id, [], JSONBIN_API_KEY, JSONBIN_BIN_ID) # Clear JSONBin.io history
         st.rerun()
 
     st.info("Your conversation is now saved automatically.")
 
     # Initialize chat history
     if "messages" not in st.session_state:
-        st.session_state.messages = load_history_from_bigquery(get_bigquery_client(), st.session_state.session_id)
+        st.session_state.messages = load_history_from_jsonbin(st.session_state.session_id, JSONBIN_API_KEY, JSONBIN_BIN_ID)
 
     # Display chat messages
     for message in st.session_state.messages:
@@ -250,7 +248,7 @@ with tab2:
                     
                     message_placeholder.markdown(full_response)
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
-                    save_history_to_bigquery(bq_client, st.session_state.session_id, st.session_state.messages)
+                    save_history_to_jsonbin(st.session_state.session_id, st.session_state.messages, JSONBIN_API_KEY, JSONBIN_BIN_ID)
 
                 except requests.exceptions.RequestException as e:
                     error_message = f"API Error: {e}\n\nResponse: {response.text if 'response' in locals() else 'N/A'}"
