@@ -222,7 +222,7 @@ with tab2:
 
         with st.chat_message("assistant"):
             with st.spinner("Agent is thinking..."):
-                message_placeholder = st.empty()
+                
                 
                 try:
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
@@ -278,15 +278,15 @@ with tab2:
                     response_json = response.json()
                     full_response = response_json['candidates'][0]['content']['parts'][0]['text']
                     
-                    message_placeholder.markdown(full_response)
+                    st.markdown(full_response)
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
                     save_history_to_sheet(worksheet, st.session_state.messages)
 
                 except requests.exceptions.RequestException as e:
                     error_message = f"API Error: {e}\n\nResponse: {response.text if 'response' in locals() else 'N/A'}"
-                    message_placeholder.markdown(f"**Ошибка:** {error_message}")
+                    st.markdown(f"**Ошибка:** {error_message}")
                     st.session_state.messages.append({"role": "assistant", "content": error_message})
                 except (KeyError, IndexError) as e:
                     error_message = f"Could not parse AI response: {e}\n\nResponse JSON: {response_json}"
-                    message_placeholder.markdown(f"**Ошибка:** {error_message}")
+                    st.markdown(f"**Ошибка:** {error_message}")
                     st.session_state.messages.append({"role": "assistant", "content": error_message})
