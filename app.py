@@ -171,6 +171,7 @@ with tab1:
                 else:
                     else:
                     else:
+                    else:
                     st.success("Data fetched successfully!")
                     # Format the data to convert Keepa timestamps
                     formatted_products = format_keepa_data(product_data.get('products'))
