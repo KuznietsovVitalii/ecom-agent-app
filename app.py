@@ -282,9 +282,9 @@ with tab2:
 
                 except requests.exceptions.RequestException as e:
                     error_message = f"API Error: {e}\n\nResponse: {response.text if 'response' in locals() else 'N/A'}"
-                    message_placeholder.error(error_message)
+                    message_placeholder.markdown(f"**Ошибка:** {error_message}")
                     st.session_state.messages.append({"role": "assistant", "content": error_message})
                 except (KeyError, IndexError) as e:
                     error_message = f"Could not parse AI response: {e}\n\nResponse JSON: {response_json}"
-                    message_placeholder.error(error_message)
+                    message_placeholder.markdown(f"**Ошибка:** {error_message}")
                     st.session_state.messages.append({"role": "assistant", "content": error_message})
