@@ -2,6 +2,33 @@ import streamlit as st
 import requests
 import pandas as pd
 import json
+from datetime import datetime, timedelta
+
+def convert_keepa_time(keepa_timestamp):
+    """Converts a Keepa integer timestamp (minutes since 2000-01-01) to a formatted string."""
+    try:
+        ts = int(keepa_timestamp)
+        return (datetime(2000, 1, 1) + timedelta(minutes=ts)).strftime('%Y-%m-%d %H:%M')
+    except (ValueError, TypeError):
+        return keepa_timestamp
+
+def format_keepa_data(data):
+    """Recursively traverses Keepa data to format timestamps in keys."""
+    if isinstance(data, dict):
+        new_dict = {}
+        for k, v in data.items():
+            # Keepa timestamps are integer keys in 'csv' and other history arrays
+            # They can also be string representations of integers.
+            new_key = convert_keepa_time(k)
+            new_dict[new_key] = format_keepa_data(v)
+        return new_dict
+    elif isinstance(data, list):
+        # Check if it's a history list like [timestamp, value]
+        if len(data) > 0 and isinstance(data[0], list) and len(data[0]) == 2 and isinstance(data[0][0], int):
+             return [[convert_keepa_time(item[0]), item[1]] for item in data]
+        return [format_keepa_data(item) for item in data]
+    else:
+        return data
 import io
 import PyPDF2
 import gspread
@@ -142,9 +169,12 @@ with tab1:
                 elif not product_data.get('products'):
                     st.warning("No products found for the given ASINs.")
                 else:
+                    else:
                     st.success("Data fetched successfully!")
-                    st.session_state.keepa_data = product_data.get('products')
-                    st.write("Data is now available in the chat agent for analysis.")
+                    # Format the data to convert Keepa timestamps
+                    formatted_products = format_keepa_data(product_data.get('products'))
+                    st.session_state.keepa_data = formatted_products
+                    st.write("Data from the last product (with converted dates) is available in the chat agent for analysis.")
                     st.json(st.session_state.keepa_data)
 
 with tab2:
