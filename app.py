@@ -198,11 +198,9 @@ with tab2:
         st.session_state.messages = load_history_from_sheet(worksheet)
 
     # Display chat messages
-    chat_history_container = st.container(height=300) # Set a fixed height for scrolling
-    with chat_history_container:
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
     # New integrated chat input
     prompt = st.chat_input(
