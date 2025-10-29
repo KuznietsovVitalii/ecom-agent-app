@@ -8,24 +8,33 @@ def convert_keepa_time(keepa_timestamp):
     """Converts a Keepa integer timestamp (minutes since 2000-01-01) to a formatted string."""
     try:
         ts = int(keepa_timestamp)
+        # A sanity check to prevent overflow for very large numbers that are not valid timestamps.
+        if ts > 100000000:  # Corresponds to a date far in the future
+            return keepa_timestamp
         return (datetime(2000, 1, 1) + timedelta(minutes=ts)).strftime('%Y-%m-%d %H:%M')
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
+        # If it's not a valid timestamp integer, or it overflows, return the original value
         return keepa_timestamp
 
 def format_keepa_data(data):
-    """Recursively traverses Keepa data to format timestamps in keys."""
+    """Recursively traverses Keepa data to format timestamps."""
     if isinstance(data, dict):
         new_dict = {}
         for k, v in data.items():
-            # Keepa timestamps are integer keys in 'csv' and other history arrays
-            # They can also be string representations of integers.
-            new_key = convert_keepa_time(k)
+            # Only attempt to convert keys that are purely numeric strings or integers.
+            key_str = str(k)
+            if key_str.isdigit():
+                new_key = convert_keepa_time(k)
+            else:
+                new_key = k
             new_dict[new_key] = format_keepa_data(v)
         return new_dict
     elif isinstance(data, list):
-        # Check if it's a history list like [timestamp, value]
-        if len(data) > 0 and isinstance(data[0], list) and len(data[0]) == 2 and isinstance(data[0][0], int):
-             return [[convert_keepa_time(item[0]), item[1]] for item in data]
+        # Handles historical data arrays like [[timestamp, value], ...]
+        if len(data) > 0 and isinstance(data[0], list) and len(data[0]) > 0 and (isinstance(data[0][0], int) or (isinstance(data[0][0], str) and str(data[0][0]).isdigit())):
+             # It's a list of lists, likely history data. Convert the timestamp in the first element.
+             return [[convert_keepa_time(item[0])] + item[1:] for item in data]
+        # Otherwise, just recurse through other list items
         return [format_keepa_data(item) for item in data]
     else:
         return data
