@@ -426,6 +426,37 @@ class KeepaProduct:
         if "final price" in self.last_days.columns:
             self.avg_price = self.last_days["final price"].mean()
 
+    def get_sales_history_by_date(self):
+        """
+        Fetches and formats the monthly sales history into a date-by-date table.
+        This logic is based on the keepa_competitor_research.py script.
+        """
+        if not self.data:
+            self.query()
+        if not self.exists:
+            return pd.DataFrame()
+
+        monthly_sold = self.data[0].get("monthlySoldHistory")
+        if not monthly_sold:
+            return pd.DataFrame()
+
+        times = [self.convert_time(x) for x in monthly_sold[::2]]
+        monthly_units = monthly_sold[1::2]
+        
+        history_df = pd.DataFrame(
+            data=list(zip(times, monthly_units)),
+            columns=["Date", "Min Sales"]
+        )
+        
+        history_df = history_df[history_df["Min Sales"] != -1].reset_index(drop=True)
+        if history_df.empty:
+            return pd.DataFrame()
+
+        history_df["Max Sales"] = history_df["Min Sales"].map(self.apply_sales_tiers)
+        history_df["Avg Sales"] = (history_df["Min Sales"] * 0.9 + history_df["Max Sales"] * 0.1).astype(int)
+        
+        return history_df[["Date", "Min Sales", "Max Sales", "Avg Sales"]]
+
 
 def get_products(asins: list, domain="US", update=None):
     api = keepa.Keepa(KEEPA_API_KEY, timeout=60)
@@ -523,6 +554,14 @@ def render_sales_estimator_tab():
                         st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.warning("No historical sales data available for plotting.")
+
+                    with st.expander("Показать детальную историю продаж по датам"):
+                        with st.spinner("Загрузка истории..."):
+                            sales_history_df = product.get_sales_history_by_date()
+                            if not sales_history_df.empty:
+                                st.dataframe(sales_history_df)
+                            else:
+                                st.write("История продаж по датам недоступна.")
                 else:
                     st.error(f"Could not find data for ASIN: {asin_input}. Please check the ASIN and domain.")
         else:
