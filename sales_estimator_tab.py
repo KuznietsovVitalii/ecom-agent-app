@@ -213,7 +213,7 @@ class KeepaProduct:
             )
         )
         lds = lds.fillna(0)
-        lds = l.rename(columns={"value": "LD"})
+        lds = lds.rename(columns={"value": "LD"})
 
         sales_history = (
             pd.merge(sales_history, lds, how="outer", left_index=True, right_index=True)
