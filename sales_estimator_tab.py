@@ -124,6 +124,9 @@ class KeepaProduct:
     def get_variations(self):
         if not self.data:
             self.query()
+        
+        # Per user request, ensuring logic prioritizes the 'variations' field 
+        # to extract child ASINs, not 'variationsCSV'.
         if (
             self.data
             and "variations" in self.data[0].keys()
