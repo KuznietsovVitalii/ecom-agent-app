@@ -10,10 +10,11 @@ from google.generativeai.types import GenerationConfig, Tool
 from datetime import datetime, timedelta
 import gspread
 from google.oauth2.service_account import Credentials
+import keepa
 
 # --- Configuration ---
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v5 (Tools+Memory)")
+st.title("E-commerce Analysis Agent v6 (Category Search)")
 
 # --- Session ID ---
 if "session_id" not in st.session_state:
@@ -28,8 +29,12 @@ try:
     GCP_CLIENT_EMAIL = st.secrets["GCP_CLIENT_EMAIL"]
     GCP_PRIVATE_KEY = st.secrets["GCP_PRIVATE_KEY"]
     genai.configure(api_key=GEMINI_API_KEY)
+    keepa_api = keepa.Keepa(KEEPA_API_KEY)
 except KeyError as e:
     st.error(f"A required secret is missing: {e}. Please check your Streamlit Cloud secrets.")
+    st.stop()
+except Exception as e:
+    st.error(f"Failed to initialize APIs. Error: {e}")
     st.stop()
 
 # --- Google Sheets Persistence ---
@@ -42,7 +47,7 @@ def get_gspread_client():
         creds_dict = {
             "type": "service_account",
             "project_id": GCP_PROJECT_ID,
-            "private_key": GCP_PRIVATE_KEY.replace('\n', '\n'),
+            "private_key": GCP_PRIVATE_KEY.replace('\\n', '\n'),
             "client_email": GCP_CLIENT_EMAIL,
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
@@ -79,51 +84,35 @@ def save_history_to_sheet(worksheet, history):
     if data:
         worksheet.append_rows(data, table_range='A2')
 
-
-# --- Keepa Time Conversion ---
-def convert_keepa_time(keepa_timestamp):
-    try:
-        ts = int(keepa_timestamp)
-        return (datetime(2000, 1, 1) + timedelta(minutes=ts)).strftime('%Y-%m-%d %H:%M')
-    except (ValueError, TypeError, OverflowError):
-        return keepa_timestamp
-
-def format_keepa_data(data):
-    if isinstance(data, dict):
-        return {k: format_keepa_data(v) for k, v in data.items()}
-    elif isinstance(data, list):
-        # Check if it looks like a list of historical data points [[timestamp, value], ...]
-        if len(data) > 0 and isinstance(data[0], list) and len(data[0]) > 0 and (isinstance(data[0][0], int) or str(data[0][0]).isdigit()):
-            new_list = []
-            for item in data:
-                if isinstance(item, list) and len(item) > 0:
-                    new_list.append([convert_keepa_time(item[0])] + item[1:])
-                else:
-                    # Handle cases where a list might contain non-list items
-                    new_list.append(format_keepa_data(item)) 
-            return new_list
-        # Otherwise, just recurse through other list items
-        return [format_keepa_data(item) for item in data]
-    else:
-        return data
-
 # --- Tool Functions ---
 def get_product_info(asins: str, domain_id: int = 1):
-    """Fetches product info from Keepa. Returns a JSON string."""
-    if isinstance(asins, list):
-        asins = ','.join(asins)
+    """Fetches product info from Keepa for a list of ASINs. Returns a JSON string."""
     try:
-        response = requests.get(f"https://api.keepa.com/product", params={'key': KEEPA_API_KEY, 'domain': domain_id, 'asin': asins, 'stats': 90, 'history': 1})
-        response.raise_for_status()
-        product_data = response.json()
-        formatted_data = format_keepa_data(product_data)
-        return json.dumps(formatted_data)
-    except requests.RequestException as e:
+        if isinstance(asins, str):
+            asins = asins.split(',')
+        products = keepa_api.query(asins, domain=domain_id, stats=90, history=True)
+        return json.dumps(products)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+def search_for_categories(search_term: str, domain_id: int = 1):
+    """Searches for Keepa category IDs. Returns a JSON string of matching categories."""
+    try:
+        categories = keepa_api.search_for_categories(search_term, domain=domain_id)
+        return json.dumps(categories)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+def get_best_sellers(category_id: str, domain_id: int = 1):
+    """Gets the list of best seller ASINs for a given Keepa category ID. Returns a JSON string."""
+    try:
+        asins = keepa_api.best_sellers_query(category_id, domain=domain_id)
+        return json.dumps(asins)
+    except Exception as e:
         return json.dumps({"error": str(e)})
 
 def google_search(query: str):
     """Performs a Google search."""
-    # This is a placeholder. The CLI environment intercepts this.
     return f"Performing Google search for: {query}"
 
 # --- Gemini Model and Tools ---
@@ -131,7 +120,7 @@ tools = [
     Tool(function_declarations=[
         genai.protos.FunctionDeclaration(
             name='get_product_info',
-            description='Fetches product information from Keepa for a list of ASINs.',
+            description='Fetches detailed product information from Keepa for a list of ASINs.',
             parameters=genai.protos.Schema(
                 type=genai.protos.Type.OBJECT,
                 properties={
@@ -142,8 +131,32 @@ tools = [
             )
         ),
         genai.protos.FunctionDeclaration(
+            name='search_for_categories',
+            description='Searches for Keepa category IDs by a search term.',
+            parameters=genai.protos.Schema(
+                type=genai.protos.Type.OBJECT,
+                properties={
+                    'search_term': genai.protos.Schema(type=genai.protos.Type.STRING, description='The category to search for (e.g., "electronics").'),
+                    'domain_id': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The Amazon domain ID (e.g., 1 for .com).')
+                },
+                required=['search_term']
+            )
+        ),
+        genai.protos.FunctionDeclaration(
+            name='get_best_sellers',
+            description='Gets the list of best seller ASINs for a given Keepa category ID.',
+            parameters=genai.protos.Schema(
+                type=genai.protos.Type.OBJECT,
+                properties={
+                    'category_id': genai.protos.Schema(type=genai.protos.Type.STRING, description='The Keepa category ID.'),
+                    'domain_id': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The Amazon domain ID (e.g., 1 for .com).')
+                },
+                required=['category_id']
+            )
+        ),
+        genai.protos.FunctionDeclaration(
             name='google_search',
-            description='Performs a Google search.',
+            description='Performs a Google search for general queries.',
             parameters=genai.protos.Schema(
                 type=genai.protos.Type.OBJECT,
                 properties={'query': genai.protos.Schema(type=genai.protos.Type.STRING, description='The search query.')},
@@ -152,16 +165,16 @@ tools = [
         )
     ])
 ]
+
 system_instruction = """You are an expert e-commerce analyst. Your primary goal is to provide accurate, data-driven insights based on the Keepa API.
 
 **Your instructions are:**
 
-1.  **Prioritize Keepa:** When a user asks a question about a product, ASIN, sales rank, price history, or any other e-commerce data, your **first and only** action should be to use the `get_product_info` tool. Do not invent information or use Google Search for this type of query.
-2.  **Use Google Search Sparingly:** You should only use the `google_search` tool if:
-    *   The user explicitly asks you to search for something on Google.
-    *   The query is clearly not related to product data (e.g., "What is the current stock price of Amazon?", "Who is the CEO of Walmart?").
-    *   The `get_product_info` tool returns no data or an error. In this case, inform the user that you couldn't find data on Keepa and then offer to search on Google.
-3.  **Be Honest and Accurate:** If you cannot find the information using the available tools, state that clearly. Do not provide false or misleading information, especially with ASINs or product data.
+1.  **Find ASINs:** If the user asks for best sellers or products in a category, first use the `search_for_categories` tool to find the correct category ID. Then, use the `get_best_sellers` tool with that ID to get a list of ASINs.
+2.  **Get Product Data:** Once you have a list of ASINs, use the `get_product_info` tool to fetch detailed data.
+3.  **Prioritize Keepa:** Always prefer using the Keepa tools (`search_for_categories`, `get_best_sellers`, `get_product_info`) for any product-related query.
+4.  **Use Google Search Sparingly:** Only use `google_search` if the user explicitly asks, or for non-product related questions.
+5.  **Be Honest and Accurate:** If you cannot find information, state that clearly. Do not invent data.
 """
 
 model = genai.GenerativeModel(
@@ -177,18 +190,13 @@ with tab1:
     st.header("Keepa Tools")
     if st.button("Check Token Status"):
         with st.spinner("Checking..."):
-            st.json(requests.get(f"https://api.keepa.com/token", params={'key': KEEPA_API_KEY}).json())
+            st.json(keepa_api.token_status)
 
     if st.button("List Available Gemini Models"):
         with st.spinner("Fetching models..."):
             try:
-                models = genai.list_models()
-                model_info = []
-                for m in models:
-                    if 'generateContent' in m.supported_generation_methods:
-                        model_info.append(f"**Model name:** {m.name}")
                 st.info("Found the following models that support 'generateContent':")
-                st.markdown("\n\n".join(model_info))
+                st.json([m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods])
             except Exception as e:
                 st.error(f"Could not list models: {e}")
 
@@ -196,15 +204,10 @@ with tab1:
         asins_input = st.text_input("Enter ASIN(s)", "B00NLLUMOE")
         if st.button("Get Product Info from Keepa"):
             with st.spinner("Fetching..."):
-                data_str = get_product_info(asins_input)
-                data = json.loads(data_str)
-                if "error" in data:
-                    st.error(data['error'])
-                else:
-                    st.success("Data fetched and formatted!")
-                    st.session_state.keepa_data = data.get('products')
-                    st.write("Data is now available in the chat agent.")
-                    st.json(st.session_state.keepa_data)
+                data = get_product_info(asins_input)
+                st.session_state.keepa_data = json.loads(data)
+                st.write("Data is now available in the chat agent.")
+                st.json(st.session_state.keepa_data)
 
 with tab2:
     st.header("Chat with Agent")
@@ -250,6 +253,10 @@ with tab2:
                         
                         if function_name == "get_product_info":
                             tool_result = get_product_info(**args)
+                        elif function_name == "search_for_categories":
+                            tool_result = search_for_categories(**args)
+                        elif function_name == "get_best_sellers":
+                            tool_result = get_best_sellers(**args)
                         elif function_name == "google_search":
                             tool_result = google_search(**args)
                         else:

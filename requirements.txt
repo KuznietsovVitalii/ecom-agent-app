@@ -5,3 +5,4 @@ google-generativeai
 gspread
 google-auth-oauthlib
 PyPDF2
+keepa
