@@ -183,6 +183,10 @@ with tab2:
         save_history_to_sheet(worksheet, [])
         st.rerun()
 
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
     if prompt := st.chat_input("Ask the agent..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         
@@ -201,7 +205,6 @@ with tab2:
 
                     chat = model.start_chat(history=history)
                     response = chat.send_message(prompt)
-                    response = chat.send_message(final_prompt)
                     
                     while response.candidates[0].content.parts[0].function_call.name:
                         function_call = response.candidates[0].content.parts[0].function_call
