@@ -107,7 +107,7 @@ def save_history_to_sheet(worksheet, history):
         worksheet.append_rows(data, table_range='A2')
 
 # --- Tool Functions ---
-def get_product_info(asins: str, limit: int = 10):
+def get_product_info(asins: str, domain_id: int, limit: int = 10):
     """
     Fetches product info from Keepa for a list of ASINs.
     Limits the number of ASINs to process to keep the request fast.
@@ -120,23 +120,23 @@ def get_product_info(asins: str, limit: int = 10):
         # Limit the number of ASINs to process
         asins_to_query = asins[:limit]
         
-        products = keepa_api.query(asins_to_query, domain=st.session_state.domain_id, stats=90, history=True)
+        products = keepa_api.query(asins_to_query, domain=domain_id, stats=90, history=True)
         return json.dumps(products)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
-def search_for_categories(search_term: str):
+def search_for_categories(search_term: str, domain_id: int):
     """Searches for Keepa category IDs. Returns a JSON string of matching categories."""
     try:
-        categories = keepa_api.search_for_categories(search_term, domain=st.session_state.domain_id)
+        categories = keepa_api.search_for_categories(search_term, domain=domain_id)
         return json.dumps(categories)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
-def get_best_sellers(category_id: str):
+def get_best_sellers(category_id: str, domain_id: int):
     """Gets the list of best seller ASINs for a given Keepa category ID. Returns a JSON string."""
     try:
-        asins = keepa_api.best_sellers_query(category_id, domain=st.session_state.domain_id)
+        asins = keepa_api.best_sellers_query(category_id, domain=domain_id)
         return json.dumps(asins)
     except Exception as e:
         return json.dumps({"error": str(e)})
@@ -155,9 +155,10 @@ tools = [
                 type=genai.protos.Type.OBJECT,
                 properties={
                     'asins': genai.protos.Schema(type=genai.protos.Type.STRING, description='A comma-separated string of ASINs.'),
+                    'domain_id': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The Amazon domain ID. Get this from the user context.'),
                     'limit': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The maximum number of ASINs to look up. Defaults to 10.')
                 },
-                required=['asins']
+                required=['asins', 'domain_id']
             )
         ),
         genai.protos.FunctionDeclaration(
@@ -166,9 +167,10 @@ tools = [
             parameters=genai.protos.Schema(
                 type=genai.protos.Type.OBJECT,
                 properties={
-                    'search_term': genai.protos.Schema(type=genai.protos.Type.STRING, description='The category to search for (e.g., "electronics").')
+                    'search_term': genai.protos.Schema(type=genai.protos.Type.STRING, description='The category to search for (e.g., "electronics").'),
+                    'domain_id': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The Amazon domain ID. Get this from the user context.')
                 },
-                required=['search_term']
+                required=['search_term', 'domain_id']
             )
         ),
         genai.protos.FunctionDeclaration(
@@ -177,9 +179,10 @@ tools = [
             parameters=genai.protos.Schema(
                 type=genai.protos.Type.OBJECT,
                 properties={
-                    'category_id': genai.protos.Schema(type=genai.protos.Type.STRING, description='The Keepa category ID.')
+                    'category_id': genai.protos.Schema(type=genai.protos.Type.STRING, description='The Keepa category ID.'),
+                    'domain_id': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The Amazon domain ID. Get this from the user context.')
                 },
-                required=['category_id']
+                required=['category_id', 'domain_id']
             )
         ),
         genai.protos.FunctionDeclaration(
@@ -228,15 +231,6 @@ with tab1:
             except Exception as e:
                 st.error(f"Could not list models: {e}")
 
-    with st.expander("Product Lookup", expanded=True):
-        asins_input = st.text_input("Enter ASIN(s)", "B00NLLUMOE")
-        if st.button("Get Product Info from Keepa"):
-            with st.spinner("Fetching..."):
-                data = get_product_info(asins_input)
-                st.session_state.keepa_data = json.loads(data)
-                st.write("Data is now available in the chat agent.")
-                st.json(st.session_state.keepa_data)
-
 with tab2:
     st.header("Chat with Agent")
     
@@ -272,8 +266,12 @@ with tab2:
                     for msg in st.session_state.messages[:-1]:
                         role = "model" if msg["role"] == "assistant" else "user"
                         history.append({'role': role, 'parts': [msg['content']]})
+                    
+                    # Add domain context to the user's prompt
+                    user_prompt = f"CONTEXT: You are currently operating in the {selected_domain_name} domain (domain_id: {st.session_state.domain_id}).\n\nUSER PROMPT: {st.session_state.messages[-1]['content']}"
+
                     chat = model.start_chat(history=history)
-                    response = chat.send_message(st.session_state.messages[-1]['content'])
+                    response = chat.send_message(user_prompt)
                     
                     while response.candidates[0].content.parts[0].function_call.name:
                         function_call = response.candidates[0].content.parts[0].function_call
