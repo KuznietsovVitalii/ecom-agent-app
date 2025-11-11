@@ -152,7 +152,23 @@ tools = [
         )
     ])
 ]
-model = genai.GenerativeModel(model_name='models/gemini-2.5-pro', tools=tools)
+system_instruction = """You are an expert e-commerce analyst. Your primary goal is to provide accurate, data-driven insights based on the Keepa API.
+
+**Your instructions are:**
+
+1.  **Prioritize Keepa:** When a user asks a question about a product, ASIN, sales rank, price history, or any other e-commerce data, your **first and only** action should be to use the `get_product_info` tool. Do not invent information or use Google Search for this type of query.
+2.  **Use Google Search Sparingly:** You should only use the `google_search` tool if:
+    *   The user explicitly asks you to search for something on Google.
+    *   The query is clearly not related to product data (e.g., "What is the current stock price of Amazon?", "Who is the CEO of Walmart?").
+    *   The `get_product_info` tool returns no data or an error. In this case, inform the user that you couldn't find data on Keepa and then offer to search on Google.
+3.  **Be Honest and Accurate:** If you cannot find the information using the available tools, state that clearly. Do not provide false or misleading information, especially with ASINs or product data.
+"""
+
+model = genai.GenerativeModel(
+    model_name='models/gemini-2.5-pro', 
+    tools=tools,
+    system_instruction=system_instruction
+)
 
 # --- Streamlit UI ---
 tab1, tab2 = st.tabs(["Keepa Tools", "Chat with Agent"])
