@@ -85,12 +85,20 @@ def save_history_to_sheet(worksheet, history):
         worksheet.append_rows(data, table_range='A2')
 
 # --- Tool Functions ---
-def get_product_info(asins: str, domain_id: int = 1):
-    """Fetches product info from Keepa for a list of ASINs. Returns a JSON string."""
+def get_product_info(asins: str, domain_id: int = 1, limit: int = 10):
+    """
+    Fetches product info from Keepa for a list of ASINs.
+    Limits the number of ASINs to process to keep the request fast.
+    Returns a JSON string.
+    """
     try:
         if isinstance(asins, str):
             asins = asins.split(',')
-        products = keepa_api.query(asins, domain=domain_id, stats=90, history=True)
+        
+        # Limit the number of ASINs to process
+        asins_to_query = asins[:limit]
+        
+        products = keepa_api.query(asins_to_query, domain=domain_id, stats=90, history=True)
         return json.dumps(products)
     except Exception as e:
         return json.dumps({"error": str(e)})
@@ -125,7 +133,8 @@ tools = [
                 type=genai.protos.Type.OBJECT,
                 properties={
                     'asins': genai.protos.Schema(type=genai.protos.Type.STRING, description='A comma-separated string of ASINs.'),
-                    'domain_id': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The Amazon domain ID (e.g., 1 for .com).')
+                    'domain_id': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The Amazon domain ID (e.g., 1 for .com).'),
+                    'limit': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The maximum number of ASINs to look up. Defaults to 10.')
                 },
                 required=['asins']
             )
@@ -171,7 +180,7 @@ system_instruction = """You are an expert e-commerce analyst. Your primary goal 
 **Your instructions are:**
 
 1.  **Find ASINs:** If the user asks for best sellers or products in a category, first use the `search_for_categories` tool to find the correct category ID. Then, use the `get_best_sellers` tool with that ID to get a list of ASINs.
-2.  **Get Product Data:** Once you have a list of ASINs, use the `get_product_info` tool to fetch detailed data.
+2.  **Get Product Data (Top 10):** When you get a list of best seller ASINs, use the `get_product_info` tool on the **top 10 ASINs only** to keep the response fast. Inform the user that you are only showing the top 10.
 3.  **Prioritize Keepa:** Always prefer using the Keepa tools (`search_for_categories`, `get_best_sellers`, `get_product_info`) for any product-related query.
 4.  **Use Google Search Sparingly:** Only use `google_search` if the user explicitly asks, or for non-product related questions.
 5.  **Be Honest and Accurate:** If you cannot find information, state that clearly. Do not invent data.
