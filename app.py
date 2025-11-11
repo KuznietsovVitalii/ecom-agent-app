@@ -101,10 +101,6 @@ def get_product_info(asins: str):
     except Exception as e:
         return json.dumps({"error": str(e)})
 
-def google_search(query: str):
-    """Performs a Google search."""
-    return f"Performing Google search for: {query}"
-
 # --- Gemini Model and Tools ---
 tools = [
     Tool(function_declarations=[
@@ -118,28 +114,32 @@ tools = [
                 },
                 required=['asins']
             )
-        ),
-        genai.protos.FunctionDeclaration(
-            name='google_search',
-            description='Performs a Google search for general queries.',
-            parameters=genai.protos.Schema(
-                type=genai.protos.Type.OBJECT,
-                properties={'query': genai.protos.Schema(type=genai.protos.Type.STRING, description='The search query.')},
-                required=['query']
-            )
         )
-    ])
+    ]),
+    Tool(
+        function_declarations=[
+            genai.protos.FunctionDeclaration(
+                name='google_web_search', # This is the actual tool name
+                description='Performs a web search using Google Search and returns the results.',
+                parameters=genai.protos.Schema(
+                    type=genai.protos.Type.OBJECT,
+                    properties={'query': genai.protos.Schema(type=genai.protos.Type.STRING, description='The search query.')},
+                    required=['query']
+                )
+            )
+        ]
+    )
 ]
 
 system_instruction = """You are an expert e-commerce analyst for the USA market. Your knowledge is limited to data before 2023. You do not know the current date.
 
 **Your instructions are:**
 
-1.  **CRITICAL: ALWAYS USE TOOLS FOR CURRENT DATE:** If the user asks about the current date, today's date, or any other date-related question that implies currency, you **MUST** call the `google_search` tool with the query "current date". Do not make up a date. Do not respond with a date directly.
+1.  **CRITICAL: ALWAYS USE TOOLS FOR CURRENT DATE:** If the user asks about the current date, today's date, or any other date-related question that implies currency, you **MUST** call the `google_web_search` tool with the query "current date". Do not make up a date. Do not respond with a date directly.
 2.  **CRITICAL: PRIORITIZE KEEPA FOR AMAZON-RELATED QUERIES:** For *any* query related to Amazon products, sales, prices, or any other e-commerce data, you **MUST** use Keepa tools.
     *   If the user provides ASINs in the chat, you **MUST** call `get_product_info` with those ASINs.
-    *   If the user asks a general question about products (e.g., "find best selling electronics"), use `google_search` *only* to find potential ASINs, and then immediately use `get_product_info` with those ASINs. Do not provide information directly from Google Search if Keepa can provide it.
-3.  **Use Web Search for General Information:** Only use `google_search` for non-Amazon related queries, current events, or general knowledge questions.
+    *   If the user asks a general question about products (e.g., "find best selling electronics"), use `google_web_search` *only* to find potential ASINs, and then immediately use `get_product_info` with those ASINs. Do not provide information directly from Google Search if Keepa can provide it.
+3.  **Use Web Search for General Information:** Only use `google_web_search` for non-Amazon related queries, current events, or general knowledge questions.
 4.  **Be Honest:** If you cannot find information, state that clearly.
 """
 
@@ -246,8 +246,8 @@ with tab2:
                         
                         if function_name == "get_product_info":
                             tool_result = get_product_info(**args)
-                        elif function_name == "google_search":
-                            tool_result = google_search(**args)
+                        elif function_name == "google_web_search": # Changed from google_search
+                            tool_result = google_web_search(**args) # Changed from google_search
                         else:
                             raise ValueError(f"Unknown function call: {function_name}")
 
