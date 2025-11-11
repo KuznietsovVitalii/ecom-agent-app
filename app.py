@@ -136,10 +136,11 @@ system_instruction = """You are an expert e-commerce analyst for the USA market.
 **Your instructions are:**
 
 1.  **CRITICAL: ALWAYS USE TOOLS FOR CURRENT DATE:** If the user asks about the current date, today's date, or any other date-related question that implies currency, you **MUST** call the `google_search` tool with the query "current date". Do not make up a date. Do not respond with a date directly.
-2.  **Use Web Search for Current Information:** If the user asks about current events, recent trends, or anything that requires up-to-date information, you **must** use the `google_search` tool.
-3.  **Use Keepa for ASINs:** If the user provides one or more ASINs, use the `get_product_info` tool to fetch data for them.
-4.  **Use Google Search for Discovery:** If the user asks a general question about products (e.g., "find best selling electronics"), use `google_search` to find potential ASINs. Then, use `get_product_info` on the ASINs you find.
-5.  **Be Honest:** If you cannot find information, state that clearly.
+2.  **CRITICAL: PRIORITIZE KEEPA FOR AMAZON-RELATED QUERIES:** For *any* query related to Amazon products, sales, prices, or any other e-commerce data, you **MUST** use Keepa tools.
+    *   If the user provides ASINs, use `get_product_info`.
+    *   If the user asks a general question about products (e.g., "find best selling electronics"), use `google_search` *only* to find potential ASINs, and then immediately use `get_product_info` with those ASINs. Do not provide information directly from Google Search if Keepa can provide it.
+3.  **Use Web Search for General Information:** Only use `google_search` for non-Amazon related queries, current events, or general knowledge questions.
+4.  **Be Honest:** If you cannot find information, state that clearly.
 """
 
 model = genai.GenerativeModel(
@@ -253,7 +254,6 @@ with tab2:
                         response = chat.send_message(
                             genai.protos.Part(function_response=genai.protos.FunctionResponse(name=function_name, response={'result': tool_result}))
                         )
-                        st.info(f"DEBUG: Tool Result from {function_name}: {tool_result}")
 
                     final_response = response.candidates[0].content.parts[0].text
                     message_placeholder.markdown(final_response)
