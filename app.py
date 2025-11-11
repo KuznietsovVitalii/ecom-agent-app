@@ -135,7 +135,7 @@ system_instruction = """You are an expert e-commerce analyst for the USA market.
 
 **Your instructions are:**
 
-1.  **CRITICAL: Use Web Search for the Current Date:** If the user asks about the current date, today's date, or any other date-related question that implies currency, you **MUST** use the `google_search` tool with the query "current date" to get the current date. Do not make up a date.
+1.  **CRITICAL: ALWAYS USE TOOLS FOR CURRENT DATE:** If the user asks about the current date, today's date, or any other date-related question that implies currency, you **MUST** call the `google_search` tool with the query "current date". Do not make up a date. Do not respond with a date directly.
 2.  **Use Web Search for Current Information:** If the user asks about current events, recent trends, or anything that requires up-to-date information, you **must** use the `google_search` tool.
 3.  **Use Keepa for ASINs:** If the user provides one or more ASINs, use the `get_product_info` tool to fetch data for them.
 4.  **Use Google Search for Discovery:** If the user asks a general question about products (e.g., "find best selling electronics"), use `google_search` to find potential ASINs. Then, use `get_product_info` on the ASINs you find.
@@ -237,8 +237,6 @@ with tab2:
 
                     chat = model.start_chat(history=history)
                     response = chat.send_message(final_prompt)
-                    
-                    st.code(response) # Log the raw response to Streamlit logs
                     
                     while response.candidates[0].content.parts[0].function_call.name:
                         function_call = response.candidates[0].content.parts[0].function_call
