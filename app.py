@@ -7,155 +7,182 @@ import PyPDF2
 import uuid
 import google.generativeai as genai
 from google.generativeai.types import GenerationConfig, Tool
+from datetime import datetime, timedelta
+import gspread
+from google.oauth2.service_account import Credentials
 
 # --- Configuration ---
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent")
+st.title("E-commerce Analysis Agent v5 (Tools+Memory)")
 
-# --- API Keys ---
-# It's recommended to use st.secrets for production
-KEEPA_API_KEY = "icj30t3ms9osic264u5e1cqed0a2gl1gh33jb5k1eq0qmeo462qnfhb2b86rrfms" # From memory
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE") # Replace with your key or use secrets
+# --- Session ID ---
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+st.info(f"Your session ID: {st.session_state.session_id}")
 
-if GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE":
-    st.error("Please provide your Gemini API key in the code or using Streamlit secrets.")
+# --- API Key Management ---
+try:
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+    KEEPA_API_KEY = st.secrets["KEEPA_API_KEY"]
+    GCP_PROJECT_ID = st.secrets["GCP_PROJECT_ID"]
+    GCP_CLIENT_EMAIL = st.secrets["GCP_CLIENT_EMAIL"]
+    GCP_PRIVATE_KEY = st.secrets["GCP_PRIVATE_KEY"]
+    genai.configure(api_key=GEMINI_API_KEY)
+except KeyError as e:
+    st.error(f"A required secret is missing: {e}. Please check your Streamlit Cloud secrets.")
+    st.stop()
 
-genai.configure(api_key=GEMINI_API_KEY)
+# --- Google Sheets Persistence ---
+SHEET_NAME = "ecom_agent_chat_history"
+WORKSHEET_NAME = f"history_log_{st.session_state.session_id}"
 
-# --- Keepa API Logic ---
-KEEPA_BASE_URL = 'https://api.keepa.com'
-
-def get_token_status(api_key: str):
-    """Checks the status of your Keepa API token."""
+@st.cache_resource
+def get_gspread_client():
     try:
-        response = requests.get(f"{KEEPA_BASE_URL}/token", params={'key': api_key})
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        return {"error": str(e)}
+        creds_dict = {
+            "type": "service_account",
+            "project_id": GCP_PROJECT_ID,
+            "private_key_id": "your_private_key_id", # This can be found in your GCP service account JSON
+            "private_key": GCP_PRIVATE_KEY.replace('\n', '\n'),
+            "client_email": GCP_CLIENT_EMAIL,
+            "client_id": "your_client_id", # This can be found in your GCP service account JSON
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{GCP_CLIENT_EMAIL.replace('@', '%40')}"
+        }
+        creds = Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
+        return gspread.authorize(creds)
+    except Exception as e:
+        st.error(f"Failed to connect to Google Sheets. Error: {e}")
+        st.stop()
 
+def get_worksheet(client):
+    try:
+        spreadsheet = client.open(SHEET_NAME)
+    except gspread.exceptions.SpreadsheetNotFound:
+        st.error(f"Spreadsheet '{SHEET_NAME}' not found. Please create it and share it with {GCP_CLIENT_EMAIL}.")
+        st.stop()
+    try:
+        return spreadsheet.worksheet(WORKSHEET_NAME)
+    except gspread.exceptions.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(title=WORKSHEET_NAME, rows="1000", cols="2")
+        worksheet.update('A1:B1', [['Role', 'Content']])
+        return worksheet
+
+def load_history_from_sheet(worksheet):
+    records = worksheet.get_all_records()
+    return [{"role": r['Role'], "content": r['Content']} for r in records]
+
+def save_history_to_sheet(worksheet, history):
+    data = [[msg['role'], msg['content']] for msg in history]
+    worksheet.clear()
+    worksheet.update('A1:B1', [['Role', 'Content']])
+    if data:
+        worksheet.append_rows(data, table_range='A2')
+
+
+# --- Keepa Time Conversion ---
+def convert_keepa_time(keepa_timestamp):
+    try:
+        ts = int(keepa_timestamp)
+        return (datetime(2000, 1, 1) + timedelta(minutes=ts)).strftime('%Y-%m-%d %H:%M')
+    except (ValueError, TypeError, OverflowError):
+        return keepa_timestamp
+
+def format_keepa_data(data):
+    if isinstance(data, dict):
+        return {k: format_keepa_data(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        if len(data) > 0 and isinstance(data[0], list) and len(data[0]) > 0 and (isinstance(data[0][0], int) or str(data[0][0]).isdigit()):
+             return [[convert_keepa_time(item[0])] + item[1:] for item in data]
+        return [format_keepa_data(item) for item in data]
+    else:
+        return data
+
+# --- Tool Functions ---
 def get_product_info(asins: str, domain_id: int = 1):
-    """
-    Fetches product information from Keepa for a list of ASINs.
-    
-    Args:
-        asins: A comma-separated string of ASINs.
-        domain_id: The Amazon domain ID (e.g., 1 for .com).
-    """
+    """Fetches product info from Keepa. Returns a JSON string."""
     if isinstance(asins, list):
         asins = ','.join(asins)
-        
     try:
-        response = requests.get(
-            f"{KEEPA_BASE_URL}/product",
-            params={'key': KEEPA_API_KEY, 'domain': domain_id, 'asin': asins, 'stats': 90, 'history': 0}
-        )
+        response = requests.get(f"https://api.keepa.com/product", params={'key': KEEPA_API_KEY, 'domain': domain_id, 'asin': asins, 'stats': 90, 'history': 1})
         response.raise_for_status()
-        # We return the JSON string directly as the model expects that
-        return json.dumps(response.json())
+        product_data = response.json()
+        formatted_data = format_keepa_data(product_data)
+        return json.dumps(formatted_data)
     except requests.RequestException as e:
         return json.dumps({"error": str(e)})
 
-# --- Google Search Tool ---
 def google_search(query: str):
-    """
-    Performs a Google search for the given query.
-    
-    Args:
-        query: The search query.
-    """
-    # This is a placeholder for the actual tool call.
-    # The Gemini CLI environment will intercept this and execute the real search.
+    """Performs a Google search."""
+    # This is a placeholder. The CLI environment intercepts this.
     return f"Performing Google search for: {query}"
 
 # --- Gemini Model and Tools ---
 tools = [
-    Tool(
-        function_declarations=[
-            genai.protos.FunctionDeclaration(
-                name='get_product_info',
-                description='Fetches product information from Keepa for a list of ASINs.',
-                parameters=genai.protos.Schema(
-                    type=genai.protos.Type.OBJECT,
-                    properties={
-                        'asins': genai.protos.Schema(type=genai.protos.Type.STRING, description='A comma-separated string of ASINs.'),
-                        'domain_id': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The Amazon domain ID (e.g., 1 for .com).')
-                    },
-                    required=['asins']
-                )
-            ),
-            genai.protos.FunctionDeclaration(
-                name='google_search',
-                description='Performs a Google search.',
-                parameters=genai.protos.Schema(
-                    type=genai.protos.Type.OBJECT,
-                    properties={
-                        'query': genai.protos.Schema(type=genai.protos.Type.STRING, description='The search query.')
-                    },
-                    required=['query']
-                )
+    Tool(function_declarations=[
+        genai.protos.FunctionDeclaration(
+            name='get_product_info',
+            description='Fetches product information from Keepa for a list of ASINs.',
+            parameters=genai.protos.Schema(
+                type=genai.protos.Type.OBJECT,
+                properties={
+                    'asins': genai.protos.Schema(type=genai.protos.Type.STRING, description='A comma-separated string of ASINs.'),
+                    'domain_id': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The Amazon domain ID (e.g., 1 for .com).')
+                },
+                required=['asins']
             )
-        ]
-    )
+        ),
+        genai.protos.FunctionDeclaration(
+            name='google_search',
+            description='Performs a Google search.',
+            parameters=genai.protos.Schema(
+                type=genai.protos.Type.OBJECT,
+                properties={'query': genai.protos.Schema(type=genai.protos.Type.STRING, description='The search query.')},
+                required=['query']
+            )
+        )
+    ])
 ]
-
-model = genai.GenerativeModel(
-    model_name='gemini-1.5-flash-latest',
-    generation_config=GenerationConfig(temperature=0.2),
-    tools=tools
-)
+model = genai.GenerativeModel(model_name='gemini-1.5-flash-latest', tools=tools)
 
 # --- Streamlit UI ---
 tab1, tab2 = st.tabs(["Keepa Tools", "Chat with Agent"])
 
-if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())
-
 with tab1:
     st.header("Keepa Tools")
-    st.write("Direct access to Keepa API functions. Load data here to analyze it in the chat.")
-
-    with st.expander("Check API Token Status"):
-        if st.button("Check Tokens"):
-            with st.spinner("Checking..."):
-                status = get_token_status(KEEPA_API_KEY)
-                if "error" in status:
-                    st.error(f"Error: {status['error']}")
-                else:
-                    st.success(f"Tokens remaining: {status.get('tokensLeft')}")
-                    st.json(status)
+    if st.button("Check Token Status"):
+        with st.spinner("Checking..."):
+            st.json(requests.get(f"https://api.keepa.com/token", params={'key': KEEPA_API_KEY}).json())
 
     with st.expander("Product Lookup", expanded=True):
-        asins_input = st.text_input("Enter ASIN(s) (comma-separated)", "B00NLLUMOE,B07W7Q3G5R")
-        domain_options = {'USA (.com)': 1, 'Germany (.de)': 3, 'UK (.co.uk)': 2, 'Canada (.ca)': 4, 'France (.fr)': 5, 'Spain (.es)': 6, 'Italy (.it)': 7, 'Japan (.co.jp)': 8, 'Mexico (.com.mx)': 11}
-        selected_domain = st.selectbox("Amazon Domain", options=list(domain_options.keys()), index=0)
-        
-        if st.button("Get Product Info"):
-            with st.spinner("Fetching product data..."):
-                domain_id = domain_options[selected_domain]
-                # We get a JSON string back
-                product_data_str = get_product_info(asins_input, domain_id)
-                product_data = json.loads(product_data_str)
-
-                if "error" in product_data:
-                    st.error(f"Error: {product_data['error']}")
-                elif not product_data.get('products'):
-                    st.warning("No products found for the given ASINs.")
+        asins_input = st.text_input("Enter ASIN(s)", "B00NLLUMOE")
+        if st.button("Get Product Info from Keepa"):
+            with st.spinner("Fetching..."):
+                data_str = get_product_info(asins_input)
+                data = json.loads(data_str)
+                if "error" in data:
+                    st.error(data['error'])
                 else:
-                    st.success("Data fetched successfully!")
-                    st.session_state.keepa_data = product_data.get('products')
-                    st.write("Data is now available in the chat agent for analysis.")
+                    st.success("Data fetched and formatted!")
+                    st.session_state.keepa_data = data.get('products')
+                    st.write("Data is now available in the chat agent.")
                     st.json(st.session_state.keepa_data)
 
 with tab2:
     st.header("Chat with Agent")
-
-    if st.button("Clear Chat"):
-        st.session_state.messages = []
-        st.rerun()
+    
+    client = get_gspread_client()
+    worksheet = get_worksheet(client)
 
     if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "Hello! How can I help you with your e-commerce analysis today?"}]
+        st.session_state.messages = load_history_from_sheet(worksheet)
+
+    if st.button("Clear Chat History"):
+        st.session_state.messages = []
+        save_history_to_sheet(worksheet, [])
+        st.rerun()
 
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
@@ -171,8 +198,8 @@ with tab2:
                 message_placeholder = st.empty()
                 
                 try:
-                    chat = model.start_chat()
-                    response = chat.send_message(prompt)
+                    chat = model.start_chat(history=[genai.types.Content(role=msg['role'], parts=[genai.types.Part(text=msg['content'])]) for msg in st.session_state.messages[:-1]])
+                    response = chat.send_message(st.session_state.messages[-1]['content'])
                     
                     while response.candidates[0].content.parts[0].function_call.name:
                         function_call = response.candidates[0].content.parts[0].function_call
@@ -182,26 +209,21 @@ with tab2:
                         if function_name == "get_product_info":
                             tool_result = get_product_info(**args)
                         elif function_name == "google_search":
-                            # This is where the CLI's google_web_search would be called
-                            # For now, we'll just return a placeholder
                             tool_result = google_search(**args)
                         else:
                             raise ValueError(f"Unknown function call: {function_name}")
 
                         response = chat.send_message(
-                            genai.protos.Part(
-                                function_response=genai.protos.FunctionResponse(
-                                    name=function_name,
-                                    response={'result': tool_result}
-                                )
-                            )
+                            genai.protos.Part(function_response=genai.protos.FunctionResponse(name=function_name, response={'result': tool_result}))
                         )
 
                     final_response = response.candidates[0].content.parts[0].text
                     message_placeholder.markdown(final_response)
                     st.session_state.messages.append({"role": "assistant", "content": final_response})
+                    save_history_to_sheet(worksheet, st.session_state.messages)
 
                 except Exception as e:
                     error_message = f"An error occurred: {e}"
                     message_placeholder.error(error_message)
                     st.session_state.messages.append({"role": "assistant", "content": error_message})
+                    save_history_to_sheet(worksheet, st.session_state.messages)
