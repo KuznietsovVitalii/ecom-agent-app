@@ -145,7 +145,7 @@ tools = [
         )
     ])
 ]
-model = genai.GenerativeModel(model_name='gemini-1.5-flash-latest', tools=tools)
+model = genai.GenerativeModel(model_name='gemini-pro', tools=tools)
 
 # --- Streamlit UI ---
 tab1, tab2 = st.tabs(["Keepa Tools", "Chat with Agent"])
