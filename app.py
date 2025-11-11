@@ -185,7 +185,7 @@ with tab2:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ask the agent...", accept_file="multiple", type=['csv', 'txt', 'pdf', 'json']):
+    if prompt := st.chat_input("Ask the agent...", accept_multiple_files=True, type=['csv', 'txt', 'pdf', 'json']):
         
         user_message_content = prompt.text
         uploaded_files = prompt.files
