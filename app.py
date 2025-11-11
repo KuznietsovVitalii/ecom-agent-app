@@ -258,7 +258,7 @@ with tab2:
                     
                     if debug_mode:
                         st.info("DEBUG: Raw Gemini Response")
-                        st.json(str(response))
+                        st.write(response)
 
                     while response.candidates[0].content.parts[0].function_call.name:
                         function_call = response.candidates[0].content.parts[0].function_call
