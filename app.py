@@ -181,17 +181,15 @@ with tab2:
         save_history_to_sheet(worksheet, [])
         st.rerun()
 
-    uploaded_files = st.file_uploader(
-        "Attach files", accept_multiple_files=True, type=['csv', 'txt', 'pdf', 'json']
-    )
-
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt_text := st.chat_input("Ask the agent..."):
+    if prompt := st.chat_input("Ask the agent...", accept_multiple_files=True, type=['csv', 'txt', 'pdf', 'json']):
         
-        user_message_content = prompt_text
+        user_message_content = prompt.text
+        uploaded_files = prompt.files
+
         if uploaded_files:
             user_message_content += f"\n\n--- Attached Files ---\n"
             for uploaded_file in uploaded_files:
@@ -223,7 +221,7 @@ with tab2:
                             else:
                                 file_context += uploaded_file.getvalue().decode("utf-8") + "\n"
 
-                    final_prompt = f"{file_context}\n\n{prompt_text}"
+                    final_prompt = f"{file_context}\n\n{prompt.text}"
 
                     chat = model.start_chat(history=history)
                     response = chat.send_message(final_prompt)
