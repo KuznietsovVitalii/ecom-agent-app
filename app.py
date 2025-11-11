@@ -246,10 +246,8 @@ with tab2:
                         
                         if function_name == "get_product_info":
                             tool_result = get_product_info(**args)
-                        elif function_name == "google_web_search": # Changed from google_search
-                            tool_result = google_web_search(**args) # Changed from google_search
-                        else:
-                            raise ValueError(f"Unknown function call: {function_name}")
+                        else: # For google_web_search and other external tools, just pass the call back to the model
+                            tool_result = f"Tool call to {function_name} with args: {args}" # Placeholder for external tool execution
 
                         response = chat.send_message(
                             genai.protos.Part(function_response=genai.protos.FunctionResponse(name=function_name, response={'result': tool_result}))
