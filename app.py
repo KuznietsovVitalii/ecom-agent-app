@@ -13,7 +13,7 @@ from google.oauth2.service_account import Credentials
 
 # --- Configuration ---
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v11 (Classic)")
+st.title("E-commerce Analysis Agent v12 (File Upload Test)")
 
 # --- Session ID ---
 if "session_id" not in st.session_state:
@@ -186,11 +186,27 @@ with tab2:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ask the agent..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    if prompt := st.chat_input("Say something and/or attach a file", accept_file=True, file_type=["jpg", "jpeg", "png", "csv", "txt", "pdf", "json"]):
+        
+        user_message_content = ""
+        if prompt.text:
+            user_message_content += prompt.text
+
+        uploaded_files = prompt.files
+        if uploaded_files:
+            user_message_content += f"\n\n--- Attached Files ---\n"
+            for uploaded_file in uploaded_files:
+                user_message_content += f"- {uploaded_file.name}\n"
+
+        st.session_state.messages.append({"role": "user", "content": user_message_content})
         
         with st.chat_message("user"):
-            st.markdown(prompt)
+            st.markdown(user_message_content)
+            if uploaded_files:
+                for uploaded_file in uploaded_files:
+                    if uploaded_file.type in ["image/jpeg", "image/png"]:
+                        st.image(uploaded_file)
+
 
         with st.chat_message("assistant"):
             with st.spinner("Agent is thinking..."):
@@ -202,8 +218,25 @@ with tab2:
                         role = "model" if msg["role"] == "assistant" else "user"
                         history.append({'role': role, 'parts': [msg['content']]})
 
+                    # Process uploaded files
+                    file_context = ""
+                    if uploaded_files:
+                        for uploaded_file in uploaded_files:
+                            if uploaded_file.type == "application/pdf":
+                                pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.getvalue()))
+                                for page in pdf_reader.pages:
+                                    file_context += page.extract_text() + "\n"
+                            elif uploaded_file.type in ["image/jpeg", "image/png"]:
+                                # The model can't process images directly in this implementation
+                                # I will just acknowledge the image
+                                file_context += f"[Image attached: {uploaded_file.name}]\n"
+                            else:
+                                file_context += uploaded_file.getvalue().decode("utf-8") + "\n"
+
+                    final_prompt = f"{file_context}\n\n{prompt.text}"
+
                     chat = model.start_chat(history=history)
-                    response = chat.send_message(prompt)
+                    response = chat.send_message(final_prompt)
                     
                     while response.candidates[0].content.parts[0].function_call.name:
                         function_call = response.candidates[0].content.parts[0].function_call
