@@ -115,32 +115,17 @@ tools = [
                 required=['asins']
             )
         )
-    ]),
-    Tool(
-        function_declarations=[
-            genai.protos.FunctionDeclaration(
-                name='google_web_search', # This is the actual tool name
-                description='Performs a web search using Google Search and returns the results.',
-                parameters=genai.protos.Schema(
-                    type=genai.protos.Type.OBJECT,
-                    properties={'query': genai.protos.Schema(type=genai.protos.Type.STRING, description='The search query.')},
-                    required=['query']
-                )
-            )
-        ]
-    )
+    ])
 ]
 
-system_instruction = """You are an expert e-commerce analyst for the USA market. Your knowledge is limited to data before 2023. You do not know the current date.
+system_instruction = """You are an expert e-commerce analyst for the USA market. Your primary goal is to provide accurate, data-driven insights based on the Keepa API.
 
 **Your instructions are:**
 
-1.  **CRITICAL: ALWAYS USE TOOLS FOR CURRENT DATE:** If the user asks about the current date, today's date, or any other date-related question that implies currency, you **MUST** call the `google_web_search` tool with the query "current date". Do not make up a date. Do not respond with a date directly.
-2.  **CRITICAL: PRIORITIZE KEEPA FOR AMAZON-RELATED QUERIES:** For *any* query related to Amazon products, sales, prices, or any other e-commerce data, you **MUST** use Keepa tools.
+1.  **PRIORITIZE KEEPA FOR ALL QUERIES:** For *any* query related to Amazon products, sales, prices, or any other e-commerce data, you **MUST** use Keepa tools.
     *   If the user provides ASINs in the chat, you **MUST** call `get_product_info` with those ASINs.
-    *   If the user asks a general question about products (e.g., "find best selling electronics"), use `google_web_search` *only* to find potential ASINs, and then immediately use `get_product_info` with those ASINs. Do not provide information directly from Google Search if Keepa can provide it.
-3.  **Use Web Search for General Information:** Only use `google_web_search` for non-Amazon related queries, current events, or general knowledge questions.
-4.  **Be Honest:** If you cannot find information, state that clearly.
+    *   If the user asks a general question about products (e.g., "find best selling electronics"), you should inform the user that you can only provide information for specific ASINs.
+2.  **Be Honest:** If you cannot find information, state that clearly.
 """
 
 model = genai.GenerativeModel(
@@ -252,7 +237,6 @@ with tab2:
                         response = chat.send_message(
                             genai.protos.Part(function_response=genai.protos.FunctionResponse(name=function_name, response={'result': tool_result}))
                         )
-                        st.info(f"DEBUG: Tool Result from {function_name}: {tool_result}")
 
                     final_response = response.candidates[0].content.parts[0].text
                     message_placeholder.markdown(final_response)
