@@ -42,10 +42,8 @@ def get_gspread_client():
         creds_dict = {
             "type": "service_account",
             "project_id": GCP_PROJECT_ID,
-            "private_key_id": "your_private_key_id", # This can be found in your GCP service account JSON
             "private_key": GCP_PRIVATE_KEY.replace('\n', '\n'),
             "client_email": GCP_CLIENT_EMAIL,
-            "client_id": "your_client_id", # This can be found in your GCP service account JSON
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
@@ -206,9 +204,11 @@ with tab2:
         save_history_to_sheet(worksheet, [])
         st.rerun()
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    chat_container = st.container(height=500)
+    with chat_container:
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
 
     if prompt := st.chat_input("Ask the agent..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
