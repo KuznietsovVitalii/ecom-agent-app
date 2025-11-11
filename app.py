@@ -73,8 +73,10 @@ def get_worksheet(client):
         worksheet.update('A1:B1', [['Role', 'Content']])
         return worksheet
 
-def load_history_from_sheet(worksheet):
-    records = worksheet.get_all_records()
+@st.cache_data(ttl="5m")
+def load_history_from_sheet(_worksheet):
+    """Loads chat history from a cell in the worksheet."""
+    records = _worksheet.get_all_records()
     return [{"role": r['Role'], "content": r['Content']} for r in records]
 
 def save_history_to_sheet(worksheet, history):
@@ -225,7 +227,8 @@ with tab2:
     worksheet = get_worksheet(client)
 
     if "messages" not in st.session_state:
-        st.session_state.messages = load_history_from_sheet(worksheet)
+        with st.spinner("Loading chat history..."):
+            st.session_state.messages = load_history_from_sheet(worksheet)
 
     if st.button("Clear Chat History"):
         st.session_state.messages = []
