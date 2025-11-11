@@ -198,7 +198,11 @@ with tab2:
                 message_placeholder = st.empty()
                 
                 try:
-                    chat = model.start_chat(history=[genai.types.Content(role=msg['role'], parts=[genai.types.Part(text=msg['content'])]) for msg in st.session_state.messages[:-1]])
+                    history = []
+                    for msg in st.session_state.messages[:-1]:
+                        role = "model" if msg["role"] == "assistant" else "user"
+                        history.append({'role': role, 'parts': [msg['content']]})
+                    chat = model.start_chat(history=history)
                     response = chat.send_message(st.session_state.messages[-1]['content'])
                     
                     while response.candidates[0].content.parts[0].function_call.name:
