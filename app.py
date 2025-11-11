@@ -254,6 +254,7 @@ with tab2:
                         response = chat.send_message(
                             genai.protos.Part(function_response=genai.protos.FunctionResponse(name=function_name, response={'result': tool_result}))
                         )
+                        st.info(f"DEBUG: Tool Result from {function_name}: {tool_result}")
 
                     final_response = response.candidates[0].content.parts[0].text
                     message_placeholder.markdown(final_response)
