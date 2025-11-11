@@ -16,6 +16,9 @@ import keepa
 st.set_page_config(layout="wide")
 st.title("E-commerce Analysis Agent v8 (Simplified)")
 
+# --- Debug Mode ---
+debug_mode = st.checkbox("Enable Debug Mode")
+
 # --- Session ID ---
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
@@ -253,6 +256,10 @@ with tab2:
                     chat = model.start_chat(history=history)
                     response = chat.send_message(st.session_state.messages[-1]['content'])
                     
+                    if debug_mode:
+                        st.info("DEBUG: Raw Gemini Response")
+                        st.json(str(response))
+
                     while response.candidates[0].content.parts[0].function_call.name:
                         function_call = response.candidates[0].content.parts[0].function_call
                         function_name = function_call.name
