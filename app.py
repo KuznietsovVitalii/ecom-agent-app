@@ -15,8 +15,6 @@ from google.oauth2.service_account import Credentials
 st.set_page_config(layout="wide")
 st.title("E-commerce Analysis Agent v12 (File Upload Test)")
 
-debug_mode = st.checkbox("Enable Debug Mode")
-
 # --- Session ID ---
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
@@ -240,9 +238,7 @@ with tab2:
                     chat = model.start_chat(history=history)
                     response = chat.send_message(final_prompt)
                     
-                    if debug_mode:
-                        st.info("DEBUG: Raw Gemini Response")
-                        st.write(response)
+                    st.code(response) # Log the raw response to Streamlit logs
                     
                     while response.candidates[0].content.parts[0].function_call.name:
                         function_call = response.candidates[0].content.parts[0].function_call
