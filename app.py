@@ -52,7 +52,7 @@ def get_gspread_client():
         creds = Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
         return gspread.authorize(creds)
     except Exception as e:
-        st.error(f"Failed to connect to Google Sheets. Error: {e}")
+        st.error(f"Failed to connect to Google Sheets. Please check your GCP credentials and ensure the spreadsheet is shared with the service account. Error: {e}")
         st.stop()
 
 def get_worksheet(client):
