@@ -10,14 +10,10 @@ from google.generativeai.types import GenerationConfig, Tool
 from datetime import datetime, timedelta
 import gspread
 from google.oauth2.service_account import Credentials
-import keepa
 
 # --- Configuration ---
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v8 (Simplified)")
-
-# --- Debug Mode ---
-debug_mode = st.checkbox("Enable Debug Mode")
+st.title("E-commerce Analysis Agent v10 (MCP Logic)")
 
 # --- Session ID ---
 if "session_id" not in st.session_state:
@@ -36,16 +32,6 @@ except KeyError as e:
     st.error(f"A required secret is missing: {e}. Please check your Streamlit Cloud secrets.")
     st.stop()
 
-@st.cache_resource
-def get_keepa_api():
-    try:
-        return keepa.Keepa(st.secrets["KEEPA_API_KEY"])
-    except Exception as e:
-        st.error(f"Failed to initialize Keepa API. Error: {e}")
-        st.stop()
-
-keepa_api = get_keepa_api()
-
 # --- Google Sheets Persistence ---
 SHEET_NAME = "ecom_agent_chat_history"
 WORKSHEET_NAME = f"history_log_{st.session_state.session_id}"
@@ -56,7 +42,7 @@ def get_gspread_client():
         creds_dict = {
             "type": "service_account",
             "project_id": GCP_PROJECT_ID,
-            "private_key": GCP_PRIVATE_KEY.replace('\\n', '\n'),
+            "private_key": GCP_PRIVATE_KEY.replace('\n', '\n'),
             "client_email": GCP_CLIENT_EMAIL,
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
@@ -95,38 +81,84 @@ def save_history_to_sheet(worksheet, history):
     if data:
         worksheet.append_rows(data, table_range='A2')
 
-# --- Tool Functions ---
-def get_product_info(asins: str, limit: int = 10):
-    """
-    Fetches product info from Keepa for a list of ASINs.
-    Limits the number of ASINs to process to keep the request fast.
-    Returns a JSON string.
-    """
+# --- Keepa MCP Logic ---
+VERIFIED_AMAZON_CATEGORIES = {
+    'Alexa Skills': 96814, 'Amazon Autos': 32373, 'Amazon Devices & Accessories': 402,
+    'Appliances': 2619525011, 'Apps & Games': 2350149011, 'Arts, Crafts & Sewing': 2617941011,
+    'Audible Books & Originals': 18145289011, 'Automotive': 15684181, 'Baby Products': 165796011,
+    'Beauty & Personal Care': 3760911, 'Books': 283155, 'CDs & Vinyl': 5174,
+    'Cell Phones & Accessories': 2335752011, 'Clothing, Shoes & Jewelry': 7141123011,
+    'Collectibles & Fine Art': 4991425011, 'Credit & Payment Cards': 3561432011,
+    'Digital Music': 163856011, 'Electronics': 172282, 'Everything Else': 10272111,
+    'Gift Cards': 2238192011, 'Grocery & Gourmet Food': 16310101, 'Handmade Products': 11260432011,
+    'Health & Household': 3760901, 'Home & Kitchen': 1055398, 'Industrial & Scientific': 16310091,
+    'Kindle Store': 133140011, 'Luxury Stores': 18981045011, 'Magazine Subscriptions': 599858,
+    'Movies & TV': 2625373011, 'Musical Instruments': 11091801, 'Office Products': 1064954,
+    'Patio, Lawn & Garden': 2972638011, 'Pet Supplies': 2619533011, 'Prime Video': 2858778011,
+    'Software': 229534, 'Sports & Outdoors': 3375251, 'Tools & Home Improvement': 228013,
+    'Toys & Games': 165793011, 'Video Games': 468642, 'Video Shorts': 9013971011
+}
+
+def get_category_id(category_name: str):
+    """Gets the Keepa category ID for a given category name."""
+    return VERIFIED_AMAZON_CATEGORIES.get(category_name)
+
+def search_products(
+    category_id: int, min_price: int = None, max_price: int = None, 
+    min_rating: float = None, sort_by: str = 'monthlySold', sort_order: str = 'desc', 
+    per_page: int = 10
+):
+    """Searches for products on Keepa using various criteria."""
+    try:
+        selection = {
+            "rootCategory": [str(category_id)],
+            "productType": ["0"],
+            "sort": [[sort_by, sort_order]]
+        }
+        if min_price is not None:
+            selection["current_AMAZON"] = {"gte": min_price * 100}
+        if max_price is not None:
+            if "current_AMAZON" not in selection:
+                selection["current_AMAZON"] = {}
+            selection["current_AMAZON"]["lte"] = max_price * 100
+        if min_rating is not None:
+            selection["current_RATING_gte"] = int(min_rating * 10)
+
+        params = {
+            'key': KEEPA_API_KEY,
+            'domain': 1, # Hardcoded to USA
+            'selection': json.dumps(selection),
+            'page': 0,
+            'perPage': per_page
+        }
+        response = requests.post("https://api.keepa.com/query", params=params)
+        response.raise_for_status()
+        query_response = response.json()
+        
+        if query_response.get("asinList"):
+            return get_product_info(query_response["asinList"])
+        else:
+            return json.dumps({"error": "No products found for the given criteria."})
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+def get_product_info(asins: list):
+    """Fetches product info from Keepa for a list of ASINs."""
     try:
         if isinstance(asins, str):
             asins = asins.split(',')
         
-        # Limit the number of ASINs to process
-        asins_to_query = asins[:limit]
-        
-        products = keepa_api.query(asins_to_query, domain=1, stats=90, history=True) # Hardcoded to USA
-        return json.dumps(products)
-    except Exception as e:
-        return json.dumps({"error": str(e)})
-
-def search_for_categories(search_term: str):
-    """Searches for Keepa category IDs. Returns a JSON string of matching categories."""
-    try:
-        categories = keepa_api.search_for_categories(search_term, domain=1) # Hardcoded to USA
-        return json.dumps(categories)
-    except Exception as e:
-        return json.dumps({"error": str(e)})
-
-def get_best_sellers(category_id: str):
-    """Gets the list of best seller ASINs for a given Keepa category ID. Returns a JSON string."""
-    try:
-        asins = keepa_api.best_sellers_query(category_id, domain=1) # Hardcoded to USA
-        return json.dumps(asins)
+        params = {
+            'key': KEEPA_API_KEY,
+            'domain': 1, # Hardcoded to USA
+            'asin': ','.join(asins),
+            'stats': 90,
+            'history': 1
+        }
+        response = requests.get("https://api.keepa.com/product", params=params)
+        response.raise_for_status()
+        return response.text
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -138,35 +170,29 @@ def google_search(query: str):
 tools = [
     Tool(function_declarations=[
         genai.protos.FunctionDeclaration(
-            name='get_product_info',
-            description='Fetches detailed product information from Keepa for a list of ASINs.',
+            name='get_category_id',
+            description='Gets the Keepa category ID for a given category name.',
             parameters=genai.protos.Schema(
                 type=genai.protos.Type.OBJECT,
                 properties={
-                    'asins': genai.protos.Schema(type=genai.protos.Type.STRING, description='A comma-separated string of ASINs.'),
-                    'limit': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The maximum number of ASINs to look up. Defaults to 10.')
+                    'category_name': genai.protos.Schema(type=genai.protos.Type.STRING, description='The name of the category (e.g., "Electronics").')
                 },
-                required=['asins']
+                required=['category_name']
             )
         ),
         genai.protos.FunctionDeclaration(
-            name='search_for_categories',
-            description='Searches for Keepa category IDs by a search term.',
+            name='search_products',
+            description='Searches for products on Keepa using various criteria.',
             parameters=genai.protos.Schema(
                 type=genai.protos.Type.OBJECT,
                 properties={
-                    'search_term': genai.protos.Schema(type=genai.protos.Type.STRING, description='The category to search for (e.g., "electronics").')
-                },
-                required=['search_term']
-            )
-        ),
-        genai.protos.FunctionDeclaration(
-            name='get_best_sellers',
-            description='Gets the list of best seller ASINs for a given Keepa category ID.',
-            parameters=genai.protos.Schema(
-                type=genai.protos.Type.OBJECT,
-                properties={
-                    'category_id': genai.protos.Schema(type=genai.protos.Type.STRING, description='The Keepa category ID.')
+                    'category_id': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The Keepa category ID.'),
+                    'min_price': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The minimum price in USD.'),
+                    'max_price': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The maximum price in USD.'),
+                    'min_rating': genai.protos.Schema(type=genai.protos.Type.NUMBER, description='The minimum rating (e.g., 4.5).'),
+                    'sort_by': genai.protos.Schema(type=genai.protos.Type.STRING, description='The field to sort by (e.g., "monthlySold").'),
+                    'sort_order': genai.protos.Schema(type=genai.protos.Type.STRING, description='The sort order ("asc" or "desc").'),
+                    'per_page': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The number of products to return.')
                 },
                 required=['category_id']
             )
@@ -187,11 +213,10 @@ system_instruction = """You are an expert e-commerce analyst for the USA market.
 
 **Your instructions are:**
 
-1.  **Find ASINs:** If the user asks for best sellers or products in a category, first use the `search_for_categories` tool to find the correct category ID. Then, use the `get_best_sellers` tool with that ID to get a list of ASINs.
-2.  **Get Product Data (Top 10):** When you get a list of best seller ASINs, use the `get_product_info` tool on the **top 10 ASINs only** to keep the response fast. Inform the user that you are only showing the top 10.
-3.  **Prioritize Keepa:** Always prefer using the Keepa tools (`search_for_categories`, `get_best_sellers`, `get_product_info`) for any product-related query.
-4.  **Use Google Search Sparingly:** Only use `google_search` if the user explicitly asks, or for non-product related questions.
-5.  **Be Honest and Accurate:** If you cannot find information, state that clearly. Do not invent data.
+1.  **Find Category ID:** If the user asks to find products in a category, you must first use the `get_category_id` tool to get the numerical ID for the category name.
+2.  **Search for Products:** Once you have the category ID, use the `search_products` tool to find products. You can also use other filters like price and rating if the user specifies them.
+3.  **Use Google Search as a last resort:** Only use `google_search` if you cannot find the information using the Keepa tools.
+4.  **Be Honest and Accurate:** If you cannot find information, state that clearly. Do not invent data.
 """
 
 model = genai.GenerativeModel(
@@ -207,7 +232,8 @@ with tab1:
     st.header("Keepa Tools")
     if st.button("Check Token Status"):
         with st.spinner("Checking..."):
-            st.json(keepa_api.token_status)
+            response = requests.get("https://api.keepa.com/token", params={'key': KEEPA_API_KEY})
+            st.json(response.json())
 
     if st.button("List Available Gemini Models"):
         with st.spinner("Fetching models..."):
@@ -256,21 +282,15 @@ with tab2:
                     chat = model.start_chat(history=history)
                     response = chat.send_message(st.session_state.messages[-1]['content'])
                     
-                    if debug_mode:
-                        st.info("DEBUG: Raw Gemini Response")
-                        st.write(response)
-
                     while response.candidates[0].content.parts[0].function_call.name:
                         function_call = response.candidates[0].content.parts[0].function_call
                         function_name = function_call.name
                         args = {key: value for key, value in function_call.args.items()}
                         
-                        if function_name == "get_product_info":
-                            tool_result = get_product_info(**args)
-                        elif function_name == "search_for_categories":
-                            tool_result = search_for_categories(**args)
-                        elif function_name == "get_best_sellers":
-                            tool_result = get_best_sellers(**args)
+                        if function_name == "get_category_id":
+                            tool_result = get_category_id(**args)
+                        elif function_name == "search_products":
+                            tool_result = search_products(**args)
                         elif function_name == "google_search":
                             tool_result = google_search(**args)
                         else:
