@@ -94,8 +94,17 @@ def format_keepa_data(data):
     if isinstance(data, dict):
         return {k: format_keepa_data(v) for k, v in data.items()}
     elif isinstance(data, list):
+        # Check if it looks like a list of historical data points [[timestamp, value], ...]
         if len(data) > 0 and isinstance(data[0], list) and len(data[0]) > 0 and (isinstance(data[0][0], int) or str(data[0][0]).isdigit()):
-             return [[convert_keepa_time(item[0])] + item[1:] for item in data]
+            new_list = []
+            for item in data:
+                if isinstance(item, list) and len(item) > 0:
+                    new_list.append([convert_keepa_time(item[0])] + item[1:])
+                else:
+                    # Handle cases where a list might contain non-list items
+                    new_list.append(format_keepa_data(item)) 
+            return new_list
+        # Otherwise, just recurse through other list items
         return [format_keepa_data(item) for item in data]
     else:
         return data
