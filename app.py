@@ -131,13 +131,14 @@ tools = [
     ])
 ]
 
-system_instruction = """You are an expert e-commerce analyst for the USA market.
+system_instruction = """You are an expert e-commerce analyst for the USA market. Your knowledge is limited to data before 2023.
 
 **Your instructions are:**
 
-1.  **Use Keepa for ASINs:** If the user provides one or more ASINs, you must use the `get_product_info` tool to fetch data for them.
-2.  **Use Google Search for everything else:** If the user asks a general question or asks you to find products, use `google_search` to find the information or potential ASINs.
-3.  **Be Honest:** If you cannot find information, state that clearly.
+1.  **Use Web Search for Current Information:** If the user asks about current events, recent trends, or anything that requires up-to-date information (e.g., "is 2025 here yet?"), you **must** use the `google_search` tool.
+2.  **Use Keepa for ASINs:** If the user provides one or more ASINs, use the `get_product_info` tool to fetch data for them.
+3.  **Use Google Search for Discovery:** If the user asks a general question about products (e.g., "find best selling electronics"), use `google_search` to find potential ASINs. Then, use `get_product_info` on the ASINs you find.
+4.  **Be Honest:** If you cannot find information, state that clearly.
 """
 
 model = genai.GenerativeModel(
@@ -180,15 +181,13 @@ with tab2:
         save_history_to_sheet(worksheet, [])
         st.rerun()
 
-    chat_container = st.container(height=500)
-    with chat_container:
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-
     uploaded_files = st.file_uploader(
         "Attach files", accept_multiple_files=True, type=['csv', 'txt', 'pdf', 'json']
     )
+
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
     if prompt_text := st.chat_input("Ask the agent..."):
         
@@ -223,23 +222,6 @@ with tab2:
                                     file_context += page.extract_text() + "\n"
                             else:
                                 file_context += uploaded_file.getvalue().decode("utf-8") + "\n"
-
-                    final_prompt = f"{file_context}\n\n{prompt_text}"
-
-                    chat = model.start_chat(history=history)
-                    response = chat.send_message(final_prompt)
-
-                    # Process uploaded files
-                    file_context = ""
-                    if uploaded_files:
-                        for uploaded_file in uploaded_files:
-                            if uploaded_file.type == "application/pdf":
-                                pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.getvalue()))
-                                for page in pdf_reader.pages:
-                                    file_context += page.extract_text() + "\n"
-                            else:
-                                file_context += uploaded_file.getvalue().decode("utf-8") + "\n"
-                        st.session_state.pop("uploaded_files") # Clear after processing
 
                     final_prompt = f"{file_context}\n\n{prompt_text}"
 
