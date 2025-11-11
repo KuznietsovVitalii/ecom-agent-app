@@ -14,7 +14,21 @@ import keepa
 
 # --- Configuration ---
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v6 (Category Search)")
+st.title("E-commerce Analysis Agent v7 (Domain Selector)")
+
+# --- Domain Selector ---
+domain_options = {
+    'USA (.com)': 1, 'Germany (.de)': 3, 'UK (.co.uk)': 2, 'Canada (.ca)': 4, 
+    'France (.fr)': 5, 'Spain (.es)': 6, 'Italy (.it)': 7, 'Japan (.co.jp)': 8, 
+    'Mexico (.com.mx)': 11
+}
+selected_domain_name = st.selectbox(
+    "Select Amazon Domain", 
+    options=list(domain_options.keys()),
+    index=0 # Default to USA
+)
+st.session_state.domain_id = domain_options[selected_domain_name]
+st.info(f"Selected Domain: **{selected_domain_name}**")
 
 # --- Session ID ---
 if "session_id" not in st.session_state:
@@ -93,7 +107,7 @@ def save_history_to_sheet(worksheet, history):
         worksheet.append_rows(data, table_range='A2')
 
 # --- Tool Functions ---
-def get_product_info(asins: str, domain_id: int = 1, limit: int = 10):
+def get_product_info(asins: str, limit: int = 10):
     """
     Fetches product info from Keepa for a list of ASINs.
     Limits the number of ASINs to process to keep the request fast.
@@ -106,23 +120,23 @@ def get_product_info(asins: str, domain_id: int = 1, limit: int = 10):
         # Limit the number of ASINs to process
         asins_to_query = asins[:limit]
         
-        products = keepa_api.query(asins_to_query, domain=domain_id, stats=90, history=True)
+        products = keepa_api.query(asins_to_query, domain=st.session_state.domain_id, stats=90, history=True)
         return json.dumps(products)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
-def search_for_categories(search_term: str, domain_id: int = 1):
+def search_for_categories(search_term: str):
     """Searches for Keepa category IDs. Returns a JSON string of matching categories."""
     try:
-        categories = keepa_api.search_for_categories(search_term, domain=domain_id)
+        categories = keepa_api.search_for_categories(search_term, domain=st.session_state.domain_id)
         return json.dumps(categories)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
-def get_best_sellers(category_id: str, domain_id: int = 1):
+def get_best_sellers(category_id: str):
     """Gets the list of best seller ASINs for a given Keepa category ID. Returns a JSON string."""
     try:
-        asins = keepa_api.best_sellers_query(category_id, domain=domain_id)
+        asins = keepa_api.best_sellers_query(category_id, domain=st.session_state.domain_id)
         return json.dumps(asins)
     except Exception as e:
         return json.dumps({"error": str(e)})
@@ -141,7 +155,6 @@ tools = [
                 type=genai.protos.Type.OBJECT,
                 properties={
                     'asins': genai.protos.Schema(type=genai.protos.Type.STRING, description='A comma-separated string of ASINs.'),
-                    'domain_id': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The Amazon domain ID (e.g., 1 for .com).'),
                     'limit': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The maximum number of ASINs to look up. Defaults to 10.')
                 },
                 required=['asins']
@@ -153,8 +166,7 @@ tools = [
             parameters=genai.protos.Schema(
                 type=genai.protos.Type.OBJECT,
                 properties={
-                    'search_term': genai.protos.Schema(type=genai.protos.Type.STRING, description='The category to search for (e.g., "electronics").'),
-                    'domain_id': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The Amazon domain ID (e.g., 1 for .com).')
+                    'search_term': genai.protos.Schema(type=genai.protos.Type.STRING, description='The category to search for (e.g., "electronics").')
                 },
                 required=['search_term']
             )
@@ -165,8 +177,7 @@ tools = [
             parameters=genai.protos.Schema(
                 type=genai.protos.Type.OBJECT,
                 properties={
-                    'category_id': genai.protos.Schema(type=genai.protos.Type.STRING, description='The Keepa category ID.'),
-                    'domain_id': genai.protos.Schema(type=genai.protos.Type.INTEGER, description='The Amazon domain ID (e.g., 1 for .com).')
+                    'category_id': genai.protos.Schema(type=genai.protos.Type.STRING, description='The Keepa category ID.')
                 },
                 required=['category_id']
             )
