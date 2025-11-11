@@ -29,13 +29,19 @@ try:
     GCP_CLIENT_EMAIL = st.secrets["GCP_CLIENT_EMAIL"]
     GCP_PRIVATE_KEY = st.secrets["GCP_PRIVATE_KEY"]
     genai.configure(api_key=GEMINI_API_KEY)
-    keepa_api = keepa.Keepa(KEEPA_API_KEY)
 except KeyError as e:
     st.error(f"A required secret is missing: {e}. Please check your Streamlit Cloud secrets.")
     st.stop()
-except Exception as e:
-    st.error(f"Failed to initialize APIs. Error: {e}")
-    st.stop()
+
+@st.cache_resource
+def get_keepa_api():
+    try:
+        return keepa.Keepa(st.secrets["KEEPA_API_KEY"])
+    except Exception as e:
+        st.error(f"Failed to initialize Keepa API. Error: {e}")
+        st.stop()
+
+keepa_api = get_keepa_api()
 
 # --- Google Sheets Persistence ---
 SHEET_NAME = "ecom_agent_chat_history"
