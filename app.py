@@ -156,6 +156,19 @@ with tab1:
         with st.spinner("Checking..."):
             st.json(requests.get(f"https://api.keepa.com/token", params={'key': KEEPA_API_KEY}).json())
 
+    if st.button("List Available Gemini Models"):
+        with st.spinner("Fetching models..."):
+            try:
+                models = genai.list_models()
+                model_info = []
+                for m in models:
+                    if 'generateContent' in m.supported_generation_methods:
+                        model_info.append(f"**Model name:** {m.name}")
+                st.info("Found the following models that support 'generateContent':")
+                st.markdown("\n\n".join(model_info))
+            except Exception as e:
+                st.error(f"Could not list models: {e}")
+
     with st.expander("Product Lookup", expanded=True):
         asins_input = st.text_input("Enter ASIN(s)", "B00NLLUMOE")
         if st.button("Get Product Info from Keepa"):
