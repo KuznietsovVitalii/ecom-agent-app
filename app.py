@@ -15,6 +15,8 @@ from google.oauth2.service_account import Credentials
 st.set_page_config(layout="wide")
 st.title("E-commerce Analysis Agent v11 (Classic)")
 
+st.write(f"Streamlit version: {st.__version__}")
+
 # --- Session ID ---
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
@@ -181,24 +183,11 @@ with tab2:
         save_history_to_sheet(worksheet, [])
         st.rerun()
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    if prompt := st.chat_input("Ask the agent...", accept_multiple_files=True, type=['csv', 'txt', 'pdf', 'json']):
-        
-        user_message_content = prompt.text
-        uploaded_files = prompt.files
-
-        if uploaded_files:
-            user_message_content += f"\n\n--- Attached Files ---\n"
-            for uploaded_file in uploaded_files:
-                user_message_content += f"- {uploaded_file.name}\n"
-
-        st.session_state.messages.append({"role": "user", "content": user_message_content})
+    if prompt := st.chat_input("Ask the agent..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
         
         with st.chat_message("user"):
-            st.markdown(user_message_content)
+            st.markdown(prompt)
 
         with st.chat_message("assistant"):
             with st.spinner("Agent is thinking..."):
@@ -210,20 +199,8 @@ with tab2:
                         role = "model" if msg["role"] == "assistant" else "user"
                         history.append({'role': role, 'parts': [msg['content']]})
 
-                    # Process uploaded files
-                    file_context = ""
-                    if uploaded_files:
-                        for uploaded_file in uploaded_files:
-                            if uploaded_file.type == "application/pdf":
-                                pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.getvalue()))
-                                for page in pdf_reader.pages:
-                                    file_context += page.extract_text() + "\n"
-                            else:
-                                file_context += uploaded_file.getvalue().decode("utf-8") + "\n"
-
-                    final_prompt = f"{file_context}\n\n{prompt.text}"
-
                     chat = model.start_chat(history=history)
+                    response = chat.send_message(prompt)
                     response = chat.send_message(final_prompt)
                     
                     while response.candidates[0].content.parts[0].function_call.name:
