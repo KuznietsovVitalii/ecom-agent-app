@@ -144,7 +144,7 @@ system_instruction = """You are an expert e-commerce analyst for the USA market.
 """
 
 model = genai.GenerativeModel(
-    model_name='models/gemini-2.5-pro', 
+    model_name='models/gemini-2.5-pro-preview-06-05', 
     tools=tools,
     system_instruction=system_instruction
 )
