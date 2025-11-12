@@ -68,19 +68,39 @@ def get_token_status(api_key):
     except requests.RequestException as e:
         return {"error": str(e)}
 
-def get_product_info(api_key, asins, domain_id=1):
-    """Looks up detailed product information by ASINs."""
+def get_product_info(api_key, asins, domain_id=1, stats_days=90, include_history=False, limit_days=None, include_offers=False, include_buybox=False, include_rating=False, force_update_hours=1):
+    """Looks up detailed product information by ASINs with configurable parameters."""
     if isinstance(asins, str):
-        asins = [asin.strip() for asin in asins.split(',')]
+        asins = [asin.strip() for asins.split(',')]
     
+    params = {
+        'key': api_key,
+        'domain': domain_id,
+        'asin': ','.join(asins),
+    }
+
+    if stats_days is not None and stats_days > 0:
+        params['stats'] = stats_days
+    
+    params['history'] = 1 if include_history else 0
+
+    if limit_days is not None and limit_days > 0:
+        params['days'] = limit_days
+    
+    if include_offers:
+        params['offers'] = 100 # Request max offers
+    
+    if include_buybox:
+        params['buybox'] = 1
+    
+    if include_rating:
+        params['rating'] = 1
+    
+    if force_update_hours is not None and force_update_hours >= -1:
+        params['update'] = force_update_hours
+
     try:
-        response = requests.get(f"{KEEPA_BASE_URL}/product", params={
-            'key': api_key,
-            'domain': domain_id,
-            'asin': ','.join(asins),
-            'stats': 90,
-            'history': 0
-        })
+        response = requests.get(f"{KEEPA_BASE_URL}/product", params=params)
         response.raise_for_status()
         return response.json()
     except requests.RequestException as e:
@@ -163,10 +183,37 @@ with tab2:
         asins_input = st.text_input("Enter ASIN(s) (comma-separated)", "B00NLLUMOE,B07W7Q3G5R")
         selected_domain = st.selectbox("Amazon Domain", options=list(domain_options.keys()), index=0)
         
+        st.subheader("Optional Keepa API Parameters:")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            include_stats = st.checkbox("Include Stats (last 90 days)", value=True)
+            include_history = st.checkbox("Include History (csv, salesRanks, etc.)", value=False)
+            include_offers = st.checkbox("Include Offers (additional token cost)", value=False)
+        with col2:
+            limit_days = st.number_input("Limit History to last X days (0 for all)", min_value=0, value=0)
+            force_update_hours = st.number_input("Force Refresh if older than X hours (0 for always live, -1 for no update)", min_value=-1, value=1)
+        with col3:
+            include_buybox = st.checkbox("Include Buy Box data (additional token cost)", value=False)
+            include_rating = st.checkbox("Include Rating & Review Count History (may consume extra token)", value=False)
+
         if st.button("Get Product Info"):
             with st.spinner("Fetching product data..."):
                 domain_id = domain_options[selected_domain]
-                product_data = get_product_info(KEEPA_API_KEY, asins_input, domain_id)
+                
+                stats_param = 90 if include_stats else None # Default to 90 days if stats is included
+                
+                product_data = get_product_info(
+                    KEEPA_API_KEY, 
+                    asins_input, 
+                    domain_id,
+                    stats_days=stats_param,
+                    include_history=include_history,
+                    limit_days=limit_days,
+                    include_offers=include_offers,
+                    include_buybox=include_buybox,
+                    include_rating=include_rating,
+                    force_update_hours=force_update_hours
+                )
                 if "error" in product_data:
                     st.error(f"Error: {product_data['error']}")
                 elif not product_data.get('products'):
