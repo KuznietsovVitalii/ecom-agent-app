@@ -76,7 +76,7 @@ def get_product_info(api_key, asins, domain_id=1):
             'domain': domain_id,
             'asin': ','.join(asins),
             'stats': 90,
-            'history': 1
+            'history': 0
         })
         response.raise_for_status()
         return response.json()
@@ -111,7 +111,7 @@ def find_products(api_key, domain_id=1, selection_params={}):
         return {"error": str(e)}
 
 # --- Streamlit UI ---
-tab1, tab2, tab3 = st.tabs(["Keepa Tools", "Chat with Agent", "Advanced Keepa Analysis"])
+tab1, tab2 = st.tabs(["Keepa Tools", "Chat with Agent"])
 
 with tab1:
     st.header("Keepa Tools")
