@@ -2,249 +2,273 @@ import streamlit as st
 import requests
 import pandas as pd
 import json
-import io
-import PyPDF2
-import uuid
-import google.generativeai as genai
-from google.generativeai.types import GenerationConfig, Tool
 from datetime import datetime, timedelta
-import gspread
-from google.oauth2.service_account import Credentials
 
-# --- Configuration ---
+def convert_keepa_time(keepa_timestamp):
+    """Converts a Keepa integer timestamp (minutes since 2000-01-01) to a formatted string."""
+    try:
+        ts = int(keepa_timestamp)
+        return (datetime(2000, 1, 1) + timedelta(minutes=ts)).strftime('%Y-%m-%d %H:%M')
+    except (ValueError, TypeError):
+        return keepa_timestamp
+
+def format_keepa_data(data):
+    """Recursively traverses Keepa data to format timestamps in keys."""
+    if isinstance(data, dict):
+        new_dict = {}
+        for k, v in data.items():
+            # Keepa timestamps are integer keys in 'csv' and other history arrays
+            # They can also be string representations of integers.
+            new_key = convert_keepa_time(k)
+            new_dict[new_key] = format_keepa_data(v)
+        return new_dict
+    elif isinstance(data, list):
+        # Check if it's a history list like [timestamp, value]
+        if len(data) > 0 and isinstance(data[0], list) and len(data[0]) == 2 and isinstance(data[0][0], int):
+             return [[convert_keepa_time(item[0]), item[1]] for item in data]
+        return [format_keepa_data(item) for item in data]
+    else:
+        return data
+
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v12 (File Upload Test)")
-
-# --- Session ID ---
-if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())
-st.info(f"Your session ID: {st.session_state.session_id}")
+st.title("E-commerce Analysis Agent v2")
 
 # --- API Key Management ---
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     KEEPA_API_KEY = st.secrets["KEEPA_API_KEY"]
-    GCP_PROJECT_ID = st.secrets["GCP_PROJECT_ID"]
-    GCP_CLIENT_EMAIL = st.secrets["GCP_CLIENT_EMAIL"]
-    GCP_PRIVATE_KEY = st.secrets["GCP_PRIVATE_KEY"]
-    genai.configure(api_key=GEMINI_API_KEY)
-except KeyError as e:
-    st.error(f"A required secret is missing: {e}. Please check your Streamlit Cloud secrets.")
+except (FileNotFoundError, KeyError):
+    st.error("API keys (GEMINI_API_KEY, KEEPA_API_KEY) not found in Streamlit secrets. Please add them.")
+    st.info('''
+        To add secrets on Streamlit Community Cloud:
+        1. Go to your app's dashboard.
+        2. Click on 'Settings' > 'Secrets'.
+        3. Add your keys in TOML format, e.g.:
+           GEMINI_API_KEY = "your_gemini_key"
+           KEEPA_API_KEY = "your_keepa_key"
+    ''')
     st.stop()
 
-# --- Google Sheets Persistence ---
-SHEET_NAME = "ecom_agent_chat_history"
-WORKSHEET_NAME = f"history_log_{st.session_state.session_id}"
+# --- Keepa API Logic (Ported from keepa_mcp_server) ---
+KEEPA_BASE_URL = 'https://api.keepa.com'
 
-@st.cache_resource
-def get_gspread_client():
+def get_token_status(api_key):
+    """Checks the remaining Keepa API tokens."""
     try:
-        creds_dict = {
-            "type": "service_account",
-            "project_id": GCP_PROJECT_ID,
-            "private_key": GCP_PRIVATE_KEY.replace('\n', '\n'),
-            "client_email": GCP_CLIENT_EMAIL,
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{GCP_CLIENT_EMAIL.replace('@', '%40')}"
-        }
-        creds = Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
-        return gspread.authorize(creds)
-    except Exception as e:
-        st.error(f"Failed to connect to Google Sheets. Please check your GCP credentials and ensure the spreadsheet is shared with the service account. Error: {e}")
-        st.stop()
+        response = requests.get(f"{KEEPA_BASE_URL}/token", params={'key': api_key})
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        return {"error": str(e)}
 
-def get_worksheet(client):
+def get_product_info(api_key, asins, domain_id=1):
+    """Looks up detailed product information by ASINs."""
+    if isinstance(asins, str):
+        asins = [asin.strip() for asin in asins.split(',')]
+    
     try:
-        spreadsheet = client.open(SHEET_NAME)
-    except gspread.exceptions.SpreadsheetNotFound:
-        st.error(f"Spreadsheet '{SHEET_NAME}' not found. Please create it and share it with {GCP_CLIENT_EMAIL}.")
-        st.stop()
-    try:
-        return spreadsheet.worksheet(WORKSHEET_NAME)
-    except gspread.exceptions.WorksheetNotFound:
-        worksheet = spreadsheet.add_worksheet(title=WORKSHEET_NAME, rows="1000", cols="2")
-        worksheet.update('A1:B1', [['Role', 'Content']])
-        return worksheet
-
-@st.cache_data(ttl="5m")
-def load_history_from_sheet(_worksheet):
-    """Loads chat history from a cell in the worksheet."""
-    records = _worksheet.get_all_records()
-    return [{"role": r['Role'], "content": r['Content']} for r in records]
-
-def save_history_to_sheet(worksheet, history):
-    data = [[msg['role'], msg['content']] for msg in history]
-    worksheet.clear()
-    worksheet.update('A1:B1', [['Role', 'Content']])
-    if data:
-        worksheet.append_rows(data, table_range='A2')
-
-# --- Tool Functions ---
-def get_product_info(asins: str):
-    """Fetches product info from Keepa for a list of ASINs. Returns a JSON string."""
-    try:
-        if isinstance(asins, list):
-            asins = ','.join(asins)
-        
-        params = {
-            'key': KEEPA_API_KEY,
-            'domain': 1, # Hardcoded to USA
-            'asin': asins,
+        response = requests.get(f"{KEEPA_BASE_URL}/product", params={
+            'key': api_key,
+            'domain': domain_id,
+            'asin': ','.join(asins),
             'stats': 90,
             'history': 1
-        }
-        response = requests.get("https://api.keepa.com/product", params=params)
+        })
         response.raise_for_status()
-        return response.text
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+        return response.json()
+    except requests.RequestException as e:
+        return {"error": str(e)}
 
-# --- Gemini Model and Tools ---
-tools = [
-    Tool(function_declarations=[
-        genai.protos.FunctionDeclaration(
-            name='get_product_info',
-            description='Fetches detailed product information from Keepa for a list of ASINs.',
-            parameters=genai.protos.Schema(
-                type=genai.protos.Type.OBJECT,
-                properties={
-                    'asins': genai.protos.Schema(type=genai.protos.Type.STRING, description='A comma-separated string of ASINs.')
-                },
-                required=['asins']
-            )
-        )
-    ])
-]
+def get_best_sellers(api_key, category_id, domain_id=1):
+    """Fetches best sellers for a given category ID."""
+    try:
+        response = requests.get(f"{KEEPA_BASE_URL}/bestsellers", params={
+            'key': api_key,
+            'domain': domain_id,
+            'category': category_id
+        })
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        return {"error": str(e)}
 
-system_instruction = """You are an expert e-commerce analyst for the USA market. Your primary goal is to provide accurate, data-driven insights based on the Keepa API.
-
-**Your instructions are:**
-
-1.  **PRIORITIZE KEEPA FOR ALL QUERIES:** For *any* query related to Amazon products, sales, prices, or any other e-commerce data, you **MUST** use Keepa tools.
-    *   If the user provides ASINs in the chat, you **MUST** call `get_product_info` with those ASINs.
-    *   If the user asks a general question about products (e.g., "find best selling electronics"), you should inform the user that you can only provide information for specific ASINs.
-2.  **Be Honest:** If you cannot find information, state that clearly.
-"""
-
-model = genai.GenerativeModel(
-    model_name='models/gemini-2.5-pro-preview-06-05', 
-    tools=tools,
-    system_instruction=system_instruction
-)
+def find_products(api_key, domain_id=1, selection_params={}):
+    """Finds products based on various criteria."""
+    try:
+        params = {
+            'key': api_key,
+            'domain': domain_id,
+            'selection': json.dumps(selection_params)
+        }
+        response = requests.get(f"{KEEPA_BASE_URL}/query", params=params)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        return {"error": str(e)}
 
 # --- Streamlit UI ---
-tab1, tab2 = st.tabs(["Keepa Tools", "Chat with Agent"])
+tab1, tab2, tab3 = st.tabs(["Keepa Tools", "Chat with Agent", "Advanced Keepa Analysis"])
 
 with tab1:
     st.header("Keepa Tools")
-    if st.button("Check Token Status"):
-        with st.spinner("Checking..."):
-            response = requests.get("https://api.keepa.com/token", params={'key': KEEPA_API_KEY})
-            st.json(response.json())
+    st.write("Direct access to Keepa API functions.")
 
+    # --- Token Status ---
+    with st.expander("Check API Token Status"):
+        if st.button("Check Tokens"):
+            with st.spinner("Checking..."):
+                status = get_token_status(KEEPA_API_KEY)
+                if "error" in status:
+                    st.error(f"Error: {status['error']}")
+                else:
+                    st.success(f"Tokens remaining: {status.get('tokensLeft')}")
+                    st.json(status)
+
+    # --- Product Lookup ---
     with st.expander("Product Lookup", expanded=True):
-        asins_input = st.text_input("Enter ASIN(s)", "B00NLLUMOE")
-        if st.button("Get Product Info from Keepa"):
-            with st.spinner("Fetching..."):
-                data = get_product_info(asins_input)
-                st.session_state.keepa_data = json.loads(data)
-                st.write("Data is now available in the chat agent.")
-                st.json(st.session_state.keepa_data)
+        asins_input = st.text_input("Enter ASIN(s) (comma-separated)", "B00NLLUMOE,B07W7Q3G5R")
+        domain_options = {'USA (.com)': 1, 'Germany (.de)': 3, 'UK (.co.uk)': 2, 'Canada (.ca)': 4, 'France (.fr)': 5, 'Spain (.es)': 6, 'Italy (.it)': 7, 'Japan (.co.jp)': 8, 'Mexico (.com.mx)': 11}
+        selected_domain = st.selectbox("Amazon Domain", options=list(domain_options.keys()), index=0)
+        
+        if st.button("Get Product Info"):
+            with st.spinner("Fetching product data..."):
+                domain_id = domain_options[selected_domain]
+                product_data = get_product_info(KEEPA_API_KEY, asins_input, domain_id)
+                if "error" in product_data:
+                    st.error(f"Error: {product_data['error']}")
+                elif not product_data.get('products'):
+                    st.warning("No products found for the given ASINs.")
+                else:
+                    st.success("Data fetched successfully!")
+                    # Format the data to convert Keepa timestamps
+                    formatted_products = format_keepa_data(product_data.get('products'))
+                    st.session_state.keepa_data = formatted_products
+                    st.write("Data from the last product (with converted dates) is available in the chat agent for analysis.")
+                    st.json(st.session_state.keepa_data)
+
+    # --- Best Sellers ---
+    with st.expander("Best Sellers"):
+        category_id_input = st.text_input("Enter Category ID", "281052")
+        bs_domain = st.selectbox("Amazon Domain (Best Sellers)", options=list(domain_options.keys()), index=0)
+
+        if st.button("Find Best Sellers"):
+            with st.spinner("Finding best sellers..."):
+                domain_id = domain_options[bs_domain]
+                bs_data = get_best_sellers(KEEPA_API_KEY, category_id_input, domain_id)
+                if "error" in bs_data:
+                    st.error(f"Error: {bs_data['error']}")
+                elif not bs_data.get('bestSellersList'):
+                    st.warning("No best sellers found for this category.")
+                else:
+                    st.success(f"Found {len(bs_data['bestSellersList'])} best sellers.")
+                    df = pd.DataFrame(bs_data['bestSellersList'])
+                    st.dataframe(df)
+                    st.session_state.keepa_data = df.to_dict('records')
+                    st.write("Best seller list is available in the chat agent for analysis.")
 
 with tab2:
-    st.header("Chat with Agent")
-    
-    client = get_gspread_client()
-    worksheet = get_worksheet(client)
+    st.header("Chat with Keepa Expert Agent")
+    st.info("Ask the AI agent anything. Use the 'Keepa Tools' tab to load data, then ask for analysis here.")
 
+    # Initialize chat history
     if "messages" not in st.session_state:
-        with st.spinner("Loading chat history..."):
-            st.session_state.messages = load_history_from_sheet(worksheet)
-
-    if st.button("Clear Chat History"):
         st.session_state.messages = []
-        save_history_to_sheet(worksheet, [])
-        st.rerun()
 
+    # Display chat messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Say something and/or attach a file", accept_file=True, file_type=["jpg", "jpeg", "png", "csv", "txt", "pdf", "json"]):
-        
-        user_message_content = ""
-        if prompt.text:
-            user_message_content += prompt.text
-
-        uploaded_files = prompt.files
-        if uploaded_files:
-            user_message_content += f"\n\n--- Attached Files ---\n"
-            for uploaded_file in uploaded_files:
-                user_message_content += f"- {uploaded_file.name}\n"
-
-        st.session_state.messages.append({"role": "user", "content": user_message_content})
-        
+    # Accept user input
+    if prompt := st.chat_input("Ask for analysis on the data you fetched..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
-            st.markdown(user_message_content)
-            if uploaded_files:
-                for uploaded_file in uploaded_files:
-                    if uploaded_file.type in ["image/jpeg", "image/png"]:
-                        st.image(uploaded_file)
-
+            st.markdown(prompt)
 
         with st.chat_message("assistant"):
             with st.spinner("Agent is thinking..."):
                 message_placeholder = st.empty()
                 
                 try:
-                    history = []
-                    for msg in st.session_state.messages[:-1]:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
+                    headers = {'Content-Type': 'application/json'}
+
+                    system_prompt = """You are an expert e-commerce analyst specializing in Keepa data. 
+                    - Answer concisely. 
+                    - When data is available in the user's prompt, use it as the primary source for your analysis.
+                    - Do not invent data. If the user asks a question that cannot be answered with the provided data, state that the information is missing."""
+
+                    # Construct chat history
+                    history = [{"role": "user", "parts": [{"text": system_prompt}]}, {"role": "model", "parts": [{"text": "Understood."}]}]
+                    for msg in st.session_state.messages[-10:]: # Send last 10 messages
                         role = "model" if msg["role"] == "assistant" else "user"
-                        history.append({'role': role, 'parts': [msg['content']]})
+                        history.append({"role": role, "parts": [{"text": msg["content"]}]})
 
-                    # Process uploaded files
-                    file_context = ""
-                    if uploaded_files:
-                        for uploaded_file in uploaded_files:
-                            if uploaded_file.type == "application/pdf":
-                                pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.getvalue()))
-                                for page in pdf_reader.pages:
-                                    file_context += page.extract_text() + "\n"
-                            elif uploaded_file.type in ["image/jpeg", "image/png"]:
-                                # The model can't process images directly in this implementation
-                                # I will just acknowledge the image
-                                file_context += f"[Image attached: {uploaded_file.name}]\n"
-                            else:
-                                file_context += uploaded_file.getvalue().decode("utf-8") + "\n"
+                    # Add context from Keepa tools if it exists
+                    if "keepa_data" in st.session_state and st.session_state.keepa_data:
+                        context_data = json.dumps(st.session_state.keepa_data, indent=2)
+                        # Find the last user message and append context to it
+                        for item in reversed(history):
+                            if item['role'] == 'user':
+                                item['parts'][0]['text'] += f"\n\n--- Keepa Data Context ---\n{context_data}"
+                                break
+                        # Clean up session state after using it
+                        del st.session_state.keepa_data
 
-                    final_prompt = f"{file_context}\n\n{prompt.text}"
-
-                    chat = model.start_chat(history=history)
-                    response = chat.send_message(final_prompt)
+                    data = {"contents": history}
                     
-                    while response.candidates[0].content.parts[0].function_call.name:
-                        function_call = response.candidates[0].content.parts[0].function_call
-                        function_name = function_call.name
-                        args = {key: value for key, value in function_call.args.items()}
-                        
-                        if function_name == "get_product_info":
-                            tool_result = get_product_info(**args)
-                        else: # For google_web_search and other external tools, just pass the call back to the model
-                            tool_result = f"Tool call to {function_name} with args: {args}" # Placeholder for external tool execution
+                    response = requests.post(url, headers=headers, json=data)
+                    response.raise_for_status()
+                    
+                    response_json = response.json()
+                    full_response = response_json['candidates'][0]['content']['parts'][0]['text']
+                    
+                    message_placeholder.markdown(full_response)
+                    st.session_state.messages.append({"role": "assistant", "content": full_response})
 
-                        response = chat.send_message(
-                            genai.protos.Part(function_response=genai.protos.FunctionResponse(name=function_name, response={'result': tool_result}))
-                        )
-
-                    final_response = response.candidates[0].content.parts[0].text
-                    message_placeholder.markdown(final_response)
-                    st.session_state.messages.append({"role": "assistant", "content": final_response})
-                    save_history_to_sheet(worksheet, st.session_state.messages)
-
-                except Exception as e:
-                    error_message = f"An error occurred: {e}"
+                except requests.exceptions.RequestException as e:
+                    error_message = f"API Error: {e}\n\nResponse: {response.text if 'response' in locals() else 'N/A'}"
                     message_placeholder.error(error_message)
                     st.session_state.messages.append({"role": "assistant", "content": error_message})
-                    save_history_to_sheet(worksheet, st.session_state.messages)
+                except (KeyError, IndexError) as e:
+                    error_message = f"Could not parse AI response: {e}\n\nResponse JSON: {response_json}"
+                    message_placeholder.error(error_message)
+                    st.session_state.messages.append({"role": "assistant", "content": error_message})
+
+with tab3:
+    st.header("Advanced Keepa Analysis")
+    st.write("Perform in-depth analysis using Keepa historical data.")
+
+    if "keepa_data" in st.session_state and st.session_state.keepa_data:
+        product_asins = list(st.session_state.keepa_data.keys())
+        selected_asin = st.selectbox("Select ASIN for analysis", product_asins)
+
+        if selected_asin:
+            product_info = st.session_state.keepa_data[selected_asin]
+
+            st.subheader("Advanced Price History Analysis")
+            st.write("Analyzing price trends, volatility, and optimal pricing points.")
+            
+            # Display raw price data for now
+            if 'csv' in product_info:
+                st.write("Raw Price Data (New, Used, Sales Rank):")
+                # Assuming 'csv' contains [timestamp, new_price, used_price, sales_rank]
+                # Keepa's 'csv' array structure is complex, often interleaved.
+                # For simplicity, let's assume we can extract relevant price and sales rank data.
+                
+                st.json(product_info['csv'])
+            else:
+                st.info("No historical 'csv' data available for this ASIN.")
+
+            st.subheader("Sales Rank Trend Analysis")
+            st.write("Analyzing sales velocity, rank stability, and seasonal patterns.")
+            
+            # Display raw sales rank data for now
+            if 'csv' in product_info:
+                st.write("Raw Sales Rank Data:")
+                # Placeholder for actual parsing and display
+                st.json(product_info['csv'])
+            else:
+                st.info("No historical 'csv' data available for this ASIN.")
+    else:
+        st.info("Please fetch product data using the 'Keepa Tools' tab first.")
