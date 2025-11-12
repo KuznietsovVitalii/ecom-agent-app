@@ -57,17 +57,7 @@ except (FileNotFoundError, KeyError):
 # Define domain options globally
 domain_options = {'USA (.com)': 1, 'Germany (.de)': 3, 'UK (.co.uk)': 2, 'Canada (.ca)': 4, 'France (.fr)': 5, 'Spain (.es)': 6, 'Italy (.it)': 7, 'Japan (.co.jp)': 8, 'Mexico (.com.mx)': 11}
 
-# --- Keepa API Logic (Ported from keepa_mcp_server) ---
-KEEPA_BASE_URL = 'https://api.keepa.com'
 
-def get_token_status(api_key):
-    """Checks the remaining Keepa API tokens."""
-    try:
-        response = requests.get(f"{KEEPA_BASE_URL}/token", params={'key': api_key})
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        return {"error": str(e)}
 
 def get_product_info(api_key, asins, domain_id=1, stats_days=90, include_history=False, limit_days=None, include_offers=False, include_buybox=False, include_rating=False, force_update_hours=1):
     """Looks up detailed product information by ASINs with configurable parameters."""
