@@ -260,13 +260,12 @@ with tab3:
             st.write("Analyzing price trends, volatility, and optimal pricing points.")
             
             if 'csv' in product_info and product_info['csv']:
-                # Keepa's 'csv' array is interleaved. We need to know the order from product.csvType
-                # For simplicity, let's assume a common structure for now:
-                # [timestamp, AMAZON, NEW, USED, SALES_RANK, LIST_PRICE, COLLECTIBLE, REFURBISHED, NEW_FBM_SHIPPING, USED_SHIPPING, COLLECTIBLE_SHIPPING, REFURBISHED_SHIPPING, TRADE_IN]
-                # We'll extract NEW price (index 2) and SALES_RANK (index 4)
-                
-                # Find the indices for NEW price and SALES_RANK from product_info['csvType']
-                # This is a more robust way to parse the CSV data
+                st.write("--- Debug Info for Price History ---")
+                st.write(f"csvType: {product_info.get('csvType', 'Not Found')}")
+                st.write(f"Raw CSV data length: {len(product_info['csv'])}")
+                # st.json(product_info['csv']) # Uncomment for full raw CSV data if needed
+                st.write("------------------------------------")
+
                 csv_types = product_info.get('csvType', [])
                 new_price_index = -1
                 sales_rank_index = -1
@@ -282,41 +281,40 @@ with tab3:
                     new_prices = []
                     sales_ranks = []
 
-                    # The 'csv' array is flat: [timestamp1, val1_type1, val1_type2, ..., timestamp2, val2_type1, ...]
-                    # The number of values per timestamp is len(csv_types)
                     values_per_timestamp = len(csv_types)
                     
-                    for i in range(0, len(product_info['csv']), values_per_timestamp + 1):
-                        timestamp_keepa = product_info['csv'][i]
-                        timestamps.append(convert_keepa_time(timestamp_keepa))
-                        
-                        # Extract values based on their indices
-                        if new_price_index != -1:
-                            new_prices.append(product_info['csv'][i + 1 + new_price_index])
-                        if sales_rank_index != -1:
-                            sales_ranks.append(product_info['csv'][i + 1 + sales_rank_index])
-
-                    df_price_history = pd.DataFrame({
-                        'Date': pd.to_datetime(timestamps),
-                        'New Price': new_prices
-                    })
-                    df_price_history.set_index('Date', inplace=True)
-                    
-                    # Filter out -1 values (Keepa's way of indicating no data)
-                    df_price_history = df_price_history[df_price_history['New Price'] != -1]
-                    
-                    if not df_price_history.empty:
-                        st.line_chart(df_price_history['New Price'])
-                        
-                        st.write("Price Statistics (New Price):")
-                        st.write(f"Min Price: {df_price_history['New Price'].min() / 100.0:.2f}")
-                        st.write(f"Max Price: {df_price_history['New Price'].max() / 100.0:.2f}")
-                        st.write(f"Average Price: {df_price_history['New Price'].mean() / 100.0:.2f}")
-                        st.write(f"Std Dev Price: {df_price_history['New Price'].std() / 100.0:.2f}")
+                    if values_per_timestamp == 0:
+                        st.info("csvType is empty, cannot parse CSV data.")
                     else:
-                        st.info("No valid 'New Price' data found for this ASIN.")
+                        for i in range(0, len(product_info['csv']), values_per_timestamp + 1):
+                            timestamp_keepa = product_info['csv'][i]
+                            timestamps.append(convert_keepa_time(timestamp_keepa))
+                            
+                            if new_price_index != -1:
+                                new_prices.append(product_info['csv'][i + 1 + new_price_index])
+                            if sales_rank_index != -1:
+                                sales_ranks.append(product_info['csv'][i + 1 + sales_rank_index])
+
+                        df_price_history = pd.DataFrame({
+                            'Date': pd.to_datetime(timestamps),
+                            'New Price': new_prices
+                        })
+                        df_price_history.set_index('Date', inplace=True)
+                        
+                        df_price_history = df_price_history[df_price_history['New Price'] != -1]
+                        
+                        if not df_price_history.empty:
+                            st.line_chart(df_price_history['New Price'])
+                            
+                            st.write("Price Statistics (New Price):")
+                            st.write(f"Min Price: {df_price_history['New Price'].min() / 100.0:.2f}")
+                            st.write(f"Max Price: {df_price_history['New Price'].max() / 100.0:.2f}")
+                            st.write(f"Average Price: {df_price_history['New Price'].mean() / 100.0:.2f}")
+                            st.write(f"Std Dev Price: {df_price_history['New Price'].std() / 100.0:.2f}")
+                        else:
+                            st.info("No valid 'New Price' data found for this ASIN after filtering.")
                 else:
-                    st.info("Could not find 'New Price' or 'Sales Rank' indices in Keepa data.")
+                    st.info("Could not find 'New Price' or 'Sales Rank' indices in Keepa data. Check csvType above.")
             else:
                 st.info("No historical 'csv' data available for this ASIN.")
 
@@ -324,6 +322,12 @@ with tab3:
             st.write("Analyzing sales velocity, rank stability, and seasonal patterns.")
             
             if 'csv' in product_info and product_info['csv']:
+                st.write("--- Debug Info for Sales Rank ---")
+                st.write(f"csvType: {product_info.get('csvType', 'Not Found')}")
+                st.write(f"Raw CSV data length: {len(product_info['csv'])}")
+                # st.json(product_info['csv']) # Uncomment for full raw CSV data if needed
+                st.write("------------------------------------")
+
                 csv_types = product_info.get('csvType', [])
                 sales_rank_index = -1
                 
@@ -337,34 +341,36 @@ with tab3:
 
                     values_per_timestamp = len(csv_types)
                     
-                    for i in range(0, len(product_info['csv']), values_per_timestamp + 1):
-                        timestamp_keepa = product_info['csv'][i]
-                        timestamps.append(convert_keepa_time(timestamp_keepa))
-                        
-                        if sales_rank_index != -1:
-                            sales_ranks.append(product_info['csv'][i + 1 + sales_rank_index])
-
-                    df_sales_rank_history = pd.DataFrame({
-                        'Date': pd.to_datetime(timestamps),
-                        'Sales Rank': sales_ranks
-                    })
-                    df_sales_rank_history.set_index('Date', inplace=True)
-                    
-                    # Filter out -1 values (Keepa's way of indicating no data)
-                    df_sales_rank_history = df_sales_rank_history[df_sales_rank_history['Sales Rank'] != -1]
-                    
-                    if not df_sales_rank_history.empty:
-                        st.line_chart(df_sales_rank_history['Sales Rank'])
-                        
-                        st.write("Sales Rank Statistics:")
-                        st.write(f"Min Sales Rank: {df_sales_rank_history['Sales Rank'].min()}")
-                        st.write(f"Max Sales Rank: {df_sales_rank_history['Sales Rank'].max()}")
-                        st.write(f"Average Sales Rank: {df_sales_rank_history['Sales Rank'].mean():.0f}")
-                        st.write(f"Std Dev Sales Rank: {df_sales_rank_history['Sales Rank'].std():.0f}")
+                    if values_per_timestamp == 0:
+                        st.info("csvType is empty, cannot parse CSV data.")
                     else:
-                        st.info("No valid 'Sales Rank' data found for this ASIN.")
+                        for i in range(0, len(product_info['csv']), values_per_timestamp + 1):
+                            timestamp_keepa = product_info['csv'][i]
+                            timestamps.append(convert_keepa_time(timestamp_keepa))
+                            
+                            if sales_rank_index != -1:
+                                sales_ranks.append(product_info['csv'][i + 1 + sales_rank_index])
+
+                        df_sales_rank_history = pd.DataFrame({
+                            'Date': pd.to_datetime(timestamps),
+                            'Sales Rank': sales_ranks
+                        })
+                        df_sales_rank_history.set_index('Date', inplace=True)
+                        
+                        df_sales_rank_history = df_sales_rank_history[df_sales_rank_history['Sales Rank'] != -1]
+                        
+                        if not df_sales_rank_history.empty:
+                            st.line_chart(df_sales_rank_history['Sales Rank'])
+                            
+                            st.write("Sales Rank Statistics:")
+                            st.write(f"Min Sales Rank: {df_sales_rank_history['Sales Rank'].min()}")
+                            st.write(f"Max Sales Rank: {df_sales_rank_history['Sales Rank'].max()}")
+                            st.write(f"Average Sales Rank: {df_sales_rank_history['Sales Rank'].mean():.0f}")
+                            st.write(f"Std Dev Sales Rank: {df_sales_rank_history['Sales Rank'].std():.0f}")
+                        else:
+                            st.info("No valid 'Sales Rank' data found for this ASIN after filtering.")
                 else:
-                    st.info("Could not find 'Sales Rank' index in Keepa data.")
+                    st.info("Could not find 'Sales Rank' index in Keepa data. Check csvType above.")
             else:
                 st.info("No historical 'csv' data available for this ASIN.")
     else:
