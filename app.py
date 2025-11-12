@@ -128,75 +128,7 @@ with tab1:
                     st.success(f"Tokens remaining: {status.get('tokensLeft')}")
                     st.json(status)
 
-    # --- Product Lookup ---
-    with st.expander("Product Lookup", expanded=True):
-        asins_input = st.text_input("Enter ASIN(s) (comma-separated)", "B00NLLUMOE,B07W7Q3G5R")
-        domain_options = {'USA (.com)': 1, 'Germany (.de)': 3, 'UK (.co.uk)': 2, 'Canada (.ca)': 4, 'France (.fr)': 5, 'Spain (.es)': 6, 'Italy (.it)': 7, 'Japan (.co.jp)': 8, 'Mexico (.com.mx)': 11}
-        selected_domain = st.selectbox("Amazon Domain", options=list(domain_options.keys()), index=0)
-        
-        if st.button("Get Product Info"):
-            with st.spinner("Fetching product data..."):
-                domain_id = domain_options[selected_domain]
-                product_data = get_product_info(KEEPA_API_KEY, asins_input, domain_id)
-                if "error" in product_data:
-                    st.error(f"Error: {product_data['error']}")
-                elif not product_data.get('products'):
-                    st.warning("No products found for the given ASINs.")
-                else:
-                    st.success("Data fetched successfully!")
-                    # Format the data to convert Keepa timestamps
-                    formatted_products = format_keepa_data(product_data.get('products'))
-                    st.session_state.keepa_data = formatted_products
-                    st.write("Data from the last product (with converted dates) is available in the chat agent for analysis.")
-                    st.json(st.session_state.keepa_data)
-
-                    # Display formatted CSV data for better readability
-                    if formatted_products and isinstance(formatted_products, list) and len(formatted_products) > 0:
-                        first_product = formatted_products[0] # Assuming we are interested in the first product's CSV
-                        if 'csv' in first_product and first_product['csv'] and 'csvType' in first_product:
-                            st.subheader("Formatted Historical Data (CSV)")
-                            csv_types = first_product['csvType']
-                            raw_csv_data = first_product['csv']
-
-                            new_price_index = -1
-                            sales_rank_index = -1
-                            
-                            for i, type_val in enumerate(csv_types):
-                                if type_val == 1: # Keepa's code for NEW price
-                                    new_price_index = i
-                                elif type_val == 3: # Keepa's code for SALES_RANK
-                                    sales_rank_index = i
-                            
-                            if new_price_index != -1 and sales_rank_index != -1:
-                                timestamps = []
-                                new_prices = []
-                                sales_ranks = []
-
-                                values_per_timestamp = len(csv_types)
-                                
-                                if values_per_timestamp > 0:
-                                    for i in range(0, len(raw_csv_data), values_per_timestamp + 1):
-                                        timestamp_keepa = raw_csv_data[i]
-                                        timestamps.append(convert_keepa_time(timestamp_keepa))
-                                        
-                                        if new_price_index != -1:
-                                            new_prices.append(raw_csv_data[i + 1 + new_price_index] / 100.0) # Convert cents to dollars
-                                        if sales_rank_index != -1:
-                                            sales_ranks.append(raw_csv_data[i + 1 + sales_rank_index])
-
-                                    df_historical_data = pd.DataFrame({
-                                        'Date': pd.to_datetime(timestamps),
-                                        'New Price ($)': new_prices,
-                                        'Sales Rank': sales_ranks
-                                    })
-                                    df_historical_data.set_index('Date', inplace=True)
-                                    st.dataframe(df_historical_data)
-                                else:
-                                    st.info("csvType is empty, cannot parse CSV data for formatted display.")
-                            else:
-                                st.info("Could not find 'New Price' or 'Sales Rank' indices in Keepa data for formatted display.")
-                        else:
-                            st.info("No 'csv' or 'csvType' data available for formatted display.")
+    
 
     # --- Best Sellers ---
     with st.expander("Best Sellers"):
@@ -221,6 +153,27 @@ with tab1:
 with tab2:
     st.header("Chat with Keepa Expert Agent")
     st.info("Ask the AI agent anything. Use the 'Keepa Tools' tab to load data, then ask for analysis here.")
+
+    # --- Product Lookup (Moved from tab1) ---
+    with st.expander("Product Lookup", expanded=True):
+        asins_input = st.text_input("Enter ASIN(s) (comma-separated)", "B00NLLUMOE,B07W7Q3G5R")
+        domain_options = {'USA (.com)': 1, 'Germany (.de)': 3, 'UK (.co.uk)': 2, 'Canada (.ca)': 4, 'France (.fr)': 5, 'Spain (.es)': 6, 'Italy (.it)': 7, 'Japan (.co.jp)': 8, 'Mexico (.com.mx)': 11}
+        selected_domain = st.selectbox("Amazon Domain", options=list(domain_options.keys()), index=0)
+        
+        if st.button("Get Product Info"):
+            with st.spinner("Fetching product data..."):
+                domain_id = domain_options[selected_domain]
+                product_data = get_product_info(KEEPA_API_KEY, asins_input, domain_id)
+                if "error" in product_data:
+                    st.error(f"Error: {product_data['error']}")
+                elif not product_data.get('products'):
+                    st.warning("No products found for the given ASINs.")
+                else:
+                    st.success("Data fetched successfully! Data is now available for the chat agent.")
+                    # Format the data to convert Keepa timestamps
+                    formatted_products = format_keepa_data(product_data.get('products'))
+                    st.session_state.keepa_data = formatted_products
+                    # Removed st.json and st.dataframe output as requested.
 
     # Initialize chat history
     if "messages" not in st.session_state:
