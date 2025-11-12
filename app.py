@@ -26,7 +26,8 @@ def format_keepa_data(data):
         # Check if it's a history list like [timestamp, value]
         if len(data) > 0 and isinstance(data[0], list) and len(data[0]) == 2 and isinstance(data[0][0], int):
              return [[convert_keepa_time(item[0]), item[1]] for item in data]
-        return [format_keepa_data(item) for item in data]
+        # For other lists, recursively process only if elements are dicts or lists
+        return [format_keepa_data(item) if isinstance(item, (dict, list)) else item for item in data]
     else:
         return data
 
