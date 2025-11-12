@@ -184,10 +184,16 @@ with tab2:
             st.markdown(message["content"])
 
     # Accept user input
-    if prompt := st.chat_input("Ask for analysis on the data you fetched..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    if prompt := st.chat_input("Ask for analysis on the data you fetched...", accept_file=True, file_type=["jpg", "jpeg", "png", "csv", "txt"]):
+        st.session_state.messages.append({"role": "user", "content": prompt.text if prompt.text else "File uploaded"})
         with st.chat_message("user"):
-            st.markdown(prompt)
+            if prompt.text:
+                st.markdown(prompt.text)
+            if prompt.files:
+                for uploaded_file in prompt.files:
+                    st.write(f"Uploaded file: {uploaded_file.name} ({uploaded_file.size} bytes)")
+                    # You can add logic here to process the uploaded file, e.g., read its content
+                    # For now, just acknowledging the upload.
 
         with st.chat_message("assistant"):
             with st.spinner("Agent is thinking..."):
