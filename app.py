@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import json
 from datetime import datetime, timedelta
+import google.generativeai as genai
 
 def convert_keepa_time(keepa_timestamp):
     """Converts a Keepa integer timestamp (minutes since 2000-01-01) to a formatted string."""
@@ -133,6 +134,18 @@ def find_products(api_key, domain_id=1, selection_params={}):
     except requests.RequestException as e:
         return {"error": str(e)}
 
+def call_keepa_product_finder(query_json: dict, domain_id: int = 1):
+    """
+    Calls the Keepa Product Finder API to search for products based on various criteria.
+    Args:
+        query_json (dict): The query JSON containing all request parameters for the Keepa /query API.
+        domain_id (int): Integer value for the Amazon locale (e.g., 1 for .com).
+    Returns:
+        dict: The JSON response from the Keepa /query API.
+    """
+    # Assuming KEEPA_API_KEY is accessible globally
+    return find_products(KEEPA_API_KEY, domain_id, query_json)
+
 # --- Streamlit UI ---
 # This is a test comment to force a new commit.
 tab1, tab2 = st.tabs(["Keepa Tools", "Chat with Agent"])
@@ -251,19 +264,28 @@ with tab2:
                 message_placeholder = st.empty()
                 
                 try:
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
-                    headers = {'Content-Type': 'application/json'}
+                    # Configure the Gemini API with the key
+                    genai.configure(api_key=GEMINI_API_KEY)
+                    model = genai.GenerativeModel(
+                        'gemini-flash-latest',
+                        tools=[call_keepa_product_finder] # Register the tool
+                    )
 
                     system_prompt = """You are an expert e-commerce analyst specializing in Keepa data. 
                     - Answer concisely. 
                     - When data is available in the user's prompt, use it as the primary source for your analysis.
-                    - Do not invent data. If the user asks a question that cannot be answered with the provided data, state that the information is missing."""
+                    - Do not invent data. If the user asks a question that cannot be answered with the provided data, state that the information is missing.
+                    - You have access to a tool called `call_keepa_product_finder` to search for products. Use it when the user asks to find products based on criteria.
+                    - The `call_keepa_product_finder` tool requires a `query_json` dictionary and a `domain_id`.
+                    - The `query_json` can contain various filters as described in the Keepa Product Finder documentation.
+                    - Always specify the `domain_id` when calling `call_keepa_product_finder`. Default to 1 for Amazon.com if not specified by the user.
+                    - After calling the tool, summarize the results (e.g., number of ASINs found) and offer further analysis."""
 
                     # Construct chat history
-                    history = [{"role": "user", "parts": [{"text": system_prompt}]}, {"role": "model", "parts": [{"text": "Understood."}]}]
+                    history_for_gemini = [{"role": "user", "parts": [{"text": system_prompt}]}, {"role": "model", "parts": [{"text": "Understood."}]}]
                     for msg in st.session_state.messages[-10:]: # Send last 10 messages
-                        role = "model" if msg["role"] == "assistant" else "user"
-                        history.append({"role": role, "parts": [{"text": msg["content"]}]})
+                        role = "user" if msg["role"] == "user" else "model" # Gemini expects 'user' and 'model' roles
+                        history_for_gemini.append({"role": role, "parts": [{"text": msg["content"]}]})
 
                     # Add context from Keepa tools if it exists
                     if "keepa_data" in st.session_state and st.session_state.keepa_data:
@@ -275,30 +297,46 @@ with tab2:
                             context_data = context_data[:MAX_CONTEXT_CHARS] + "\n... (context truncated due to size limit)"
 
                         # Find the last user message and append context to it
-                        for item in reversed(history):
+                        for item in reversed(history_for_gemini):
                             if item['role'] == 'user':
                                 item['parts'][0]['text'] += f"\n\n--- Keepa Data Context ---\n{context_data}"
                                 break
                         # Clean up session state after using it
                         del st.session_state.keepa_data
 
-                    data = {"contents": history}
+                    # Make the initial generateContent call
+                    response = model.generate_content(history_for_gemini)
                     
-                    response = requests.post(url, headers=headers, json=data)
-                    response.raise_for_status()
-                    
-                    response_json = response.json()
-                    full_response = response_json['candidates'][0]['content']['parts'][0]['text']
+                    # Handle potential function calls
+                    if response.candidates[0].content.parts[0].function_call:
+                        function_call = response.candidates[0].content.parts[0].function_call
+                        function_name = function_call.name
+                        function_args = {k: v for k, v in function_call.args.items()} # Convert to dict
+
+                        if function_name == "call_keepa_product_finder":
+                            st.info(f"Agent is calling tool: {function_name} with args: {function_args}")
+                            tool_output = call_keepa_product_finder(**function_args)
+                            st.session_state.keepa_query_results = tool_output # Store results
+                            st.write("Product Finder results stored in session for analysis.")
+                            
+                            # Send tool output back to Gemini
+                            tool_response = model.generate_content(
+                                history_for_gemini + [
+                                    {"role": "model", "parts": [function_call]},
+                                    {"role": "tool", "parts": [{"text": json.dumps(tool_output)}]}
+                                ]
+                            )
+                            full_response = tool_response.candidates[0].content.parts[0].text
+                        else:
+                            full_response = f"Agent tried to call an unknown tool: {function_name}"
+                    else:
+                        full_response = response.candidates[0].content.parts[0].text
                     
                     message_placeholder.markdown(full_response)
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
 
-                except requests.exceptions.RequestException as e:
-                    error_message = f"API Error: {e}\n\nResponse: {response.text if 'response' in locals() else 'N/A'}"
-                    message_placeholder.error(error_message)
-                    st.session_state.messages.append({"role": "assistant", "content": error_message})
-                except (KeyError, IndexError) as e:
-                    error_message = f"Could not parse AI response: {e}\n\nResponse JSON: {response_json}"
+                except Exception as e: # Catch broader exceptions for debugging
+                    error_message = f"An unexpected error occurred: {e}"
                     message_placeholder.error(error_message)
                     st.session_state.messages.append({"role": "assistant", "content": error_message})
 
