@@ -53,6 +53,9 @@ except (FileNotFoundError, KeyError):
     ''')
     st.stop()
 
+# Define domain options globally
+domain_options = {'USA (.com)': 1, 'Germany (.de)': 3, 'UK (.co.uk)': 2, 'Canada (.ca)': 4, 'France (.fr)': 5, 'Spain (.es)': 6, 'Italy (.it)': 7, 'Japan (.co.jp)': 8, 'Mexico (.com.mx)': 11}
+
 # --- Keepa API Logic (Ported from keepa_mcp_server) ---
 KEEPA_BASE_URL = 'https://api.keepa.com'
 
@@ -111,6 +114,7 @@ def find_products(api_key, domain_id=1, selection_params={}):
         return {"error": str(e)}
 
 # --- Streamlit UI ---
+# This is a test comment to force a new commit.
 tab1, tab2 = st.tabs(["Keepa Tools", "Chat with Agent"])
 
 with tab1:
@@ -157,7 +161,6 @@ with tab2:
     # --- Product Lookup (Moved from tab1) ---
     with st.expander("Product Lookup", expanded=True):
         asins_input = st.text_input("Enter ASIN(s) (comma-separated)", "B00NLLUMOE,B07W7Q3G5R")
-        domain_options = {'USA (.com)': 1, 'Germany (.de)': 3, 'UK (.co.uk)': 2, 'Canada (.ca)': 4, 'France (.fr)': 5, 'Spain (.es)': 6, 'Italy (.it)': 7, 'Japan (.co.jp)': 8, 'Mexico (.com.mx)': 11}
         selected_domain = st.selectbox("Amazon Domain", options=list(domain_options.keys()), index=0)
         
         if st.button("Get Product Info"):
