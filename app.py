@@ -13,20 +13,23 @@ def convert_keepa_time(keepa_timestamp):
         return keepa_timestamp
 
 def format_keepa_data(data):
-    """Recursively traverses Keepa data to format timestamps in keys."""
+    """Recursively formats Keepa data, converting integer dictionary keys to dates."""
     if isinstance(data, dict):
         new_dict = {}
         for k, v in data.items():
-            # Keepa timestamps are integer keys in 'csv' and other history arrays
-            # They can also be string representations of integers.
-            new_key = convert_keepa_time(k)
-            new_dict[new_key] = format_keepa_data(v)
+            new_key = k
+            # Attempt to convert key if it's an integer (potential Keepa timestamp)
+            if isinstance(k, int):
+                try:
+                    new_key = convert_keepa_time(k)
+                except (ValueError, TypeError):
+                    pass # Keep original key if conversion fails
+            new_dict[new_key] = format_keepa_data(v) # Recursively call for values
         return new_dict
     elif isinstance(data, list):
-        # Check if it's a history list like [timestamp, value]
-        if len(data) > 0 and isinstance(data[0], list) and len(data[0]) == 2 and isinstance(data[0][0], int):
-             return [[convert_keepa_time(item[0]), item[1]] for item in data]
-        # For other lists, recursively process only if elements are dicts or lists
+        # For lists, recursively process elements only if they are dicts or lists.
+        # Do NOT attempt to convert timestamps here with item[0], as it's handled elsewhere
+        # or is not a generic list of [timestamp, value] pairs.
         return [format_keepa_data(item) if isinstance(item, (dict, list)) else item for item in data]
     else:
         return data
