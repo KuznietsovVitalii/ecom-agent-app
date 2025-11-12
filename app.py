@@ -244,11 +244,17 @@ with tab3:
     st.write("Perform in-depth analysis using Keepa historical data.")
 
     if "keepa_data" in st.session_state and st.session_state.keepa_data:
-        product_asins = list(st.session_state.keepa_data.keys())
-        selected_asin = st.selectbox("Select ASIN for analysis", product_asins)
+        # Assuming keepa_data is a list of product dictionaries
+        product_asins_map = {p['asin']: p for p in st.session_state.keepa_data if 'asin' in p}
+        product_asins = list(product_asins_map.keys())
+        
+        if not product_asins:
+            st.info("No ASINs found in the fetched product data.")
+        else:
+            selected_asin = st.selectbox("Select ASIN for analysis", product_asins)
 
-        if selected_asin:
-            product_info = st.session_state.keepa_data[selected_asin]
+            if selected_asin:
+                product_info = product_asins_map[selected_asin]
 
             st.subheader("Advanced Price History Analysis")
             st.write("Analyzing price trends, volatility, and optimal pricing points.")
