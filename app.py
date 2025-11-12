@@ -268,6 +268,12 @@ with tab2:
                     # Add context from Keepa tools if it exists
                     if "keepa_data" in st.session_state and st.session_state.keepa_data:
                         context_data = json.dumps(st.session_state.keepa_data, indent=2)
+                        
+                        # Truncate context_data if it's too large to avoid token limit errors
+                        MAX_CONTEXT_CHARS = 50000 # Approximately 12500 tokens (4 chars/token)
+                        if len(context_data) > MAX_CONTEXT_CHARS:
+                            context_data = context_data[:MAX_CONTEXT_CHARS] + "\n... (context truncated due to size limit)"
+
                         # Find the last user message and append context to it
                         for item in reversed(history):
                             if item['role'] == 'user':
