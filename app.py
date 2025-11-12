@@ -71,7 +71,7 @@ def get_token_status(api_key):
 def get_product_info(api_key, asins, domain_id=1, stats_days=90, include_history=False, limit_days=None, include_offers=False, include_buybox=False, include_rating=False, force_update_hours=1):
     """Looks up detailed product information by ASINs with configurable parameters."""
     if isinstance(asins, str):
-        asins = [asin.strip() for asins.split(',')]
+        asins = [asin.strip() for asin in asins.split(',')]
     
     params = {
         'key': api_key,
