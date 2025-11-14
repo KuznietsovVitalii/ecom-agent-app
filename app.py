@@ -23,7 +23,6 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 # --- Helper & Tool Functions ---
-@genai.tool
 def google_web_search(query: str) -> str:
     """
     Performs a web search for the given query. Use this to get current information, like today's date.
