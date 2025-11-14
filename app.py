@@ -68,7 +68,7 @@ def get_amazon_product_details(asin: str, domain_id: int = 1) -> dict:
         api_key=KEEPA_API_KEY,
         asins=asin,
         domain_id=domain_id,
-        stats_days=90,
+        stats_days=None,  # Temporarily disable stats to test hypothesis
         include_rating=True
     )
     return product_data
