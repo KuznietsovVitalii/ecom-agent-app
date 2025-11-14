@@ -31,7 +31,6 @@ def get_product_info(api_key, asins, domain_id=1, **kwargs):
         return {"error": "ASIN parameter is empty."}
 
     params = {'key': api_key, 'domain': domain_id, 'asin': ','.join(asins)}
-    # Add optional params from kwargs
     if kwargs.get('stats_days'): params['stats'] = kwargs.get('stats_days')
     if kwargs.get('include_rating'): params['rating'] = 1
     if kwargs.get('include_history'): params['history'] = 1
@@ -59,13 +58,12 @@ def get_amazon_product_details(asin: str, domain_id: int = 1) -> dict:
     if not asin or not isinstance(asin, str) or len(asin) < 10:
         return {"error": f"Invalid ASIN provided: '{asin}'. Please provide a valid 10-character ASIN."}
     
-    # Let's try the minimal request again as it's the most likely to succeed
     product_data = get_product_info(
         api_key=KEEPA_API_KEY,
         asins=asin,
         domain_id=domain_id,
-        stats_days=None,
-        include_rating=True # Rating is usually available
+        stats_days=None, # Minimal request to avoid 400 errors on basic keys
+        include_rating=True
     )
     return product_data
 
@@ -75,29 +73,42 @@ def clear_chat_history():
 
 # --- Main App Layout ---
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v9")
+st.title("E-commerce Analysis Agent v10")
 
 if not GEMINI_API_KEY or not KEEPA_API_KEY:
     st.error("API keys are not configured. Please add them in the sidebar.")
     st.stop()
 
-# Add Clear Chat button to sidebar
 st.sidebar.button("Clear Chat History", on_click=clear_chat_history)
-
 domain_options = {'USA (.com)': 1, 'Germany (.de)': 3, 'UK (.co.uk)': 2, 'Canada (.ca)': 4, 'France (.fr)': 5, 'Spain (.es)': 6, 'Italy (.it)': 7, 'Japan (.co.jp)': 8, 'Mexico (.com.mx)': 11}
 
-# --- UI Components - No more tabs ---
-
+# --- UI Components ---
 st.header("Manual Data Fetching (Optional)")
-st.info("Use this to pre-load data for the agent. The agent can also fetch data itself.")
+st.info("Use this to pre-load data with specific parameters for the agent.")
 with st.expander("Product Lookup"):
     asins_input = st.text_input("Enter ASIN(s)", "B00NLLUMOE,B07W7Q3G5R", key="manual_asin_input")
     selected_domain = st.selectbox("Amazon Domain", options=list(domain_options.keys()), index=0, key="manual_domain_select")
+    
+    st.subheader("Optional Parameters:")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        p_stats = st.checkbox("Stats (90 days)", True, key="p_stats")
+        p_history = st.checkbox("Sales Rank History", False, key="p_history")
+        p_offers = st.checkbox("Offers", False, key="p_offers")
+    with c2:
+        p_days = st.number_input("History (days)", 0, 1000, 0, key="p_days")
+        p_update = st.number_input("Refresh (hours)", -1, 24, 1, key="p_update")
+    with c3:
+        p_buybox = st.checkbox("Buy Box", False, key="p_buybox")
+        p_rating = st.checkbox("Rating/Reviews", True, key="p_rating")
+
     if st.button("Fetch Product Info for Agent"):
         with st.spinner("Fetching..."):
             product_data = get_product_info(
                 KEEPA_API_KEY, asins_input, domain_options[selected_domain],
-                stats_days=90, include_rating=True, include_history=True # Fetch more data in manual mode
+                stats_days=90 if p_stats else 0, include_history=p_history,
+                limit_days=p_days, include_offers=p_offers, include_buybox=p_buybox,
+                include_rating=p_rating, force_update_hours=p_update
             )
             if "error" in product_data: st.error(f"Error: {product_data['error']}")
             elif not product_data.get('products'): st.warning("No products found.")
@@ -108,7 +119,7 @@ with st.expander("Product Lookup"):
 st.divider()
 
 st.header("Autonomous E-commerce Agent")
-st.info("Ask about a product by ASIN, and the agent will fetch the data itself if needed. You can also ask for the current date.")
+st.info("Ask about a product by ASIN, and the agent will fetch the data itself if needed.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -122,7 +133,7 @@ for message in st.session_state.messages:
         else:
             st.markdown(message["content"])
 
-if prompt := st.chat_input("e.g., 'What is the rating for B00NLLUMOE?' or 'What is today's date?'", accept_file=True, file_type=["jpg", "jpeg", "png"]):
+if prompt := st.chat_input("e.g., 'What is the rating for B00NLLUMOE?'", accept_file=True, file_type=["jpg", "jpeg", "png"]):
     
     user_message_for_api = []
     user_message_for_history = []
@@ -148,7 +159,11 @@ if prompt := st.chat_input("e.g., 'What is the rating for B00NLLUMOE?' or 'What 
         context_prompt = ""
         if "keepa_data" in st.session_state and st.session_state.keepa_data:
             context_data = json.dumps(st.session_state.keepa_data)
-            context_prompt = f"CONTEXT: ...\n{context_data}\n\n"
+            # *** FIX: Truncate large context to prevent token limit errors ***
+            MAX_CONTEXT_CHARS = 50000 
+            if len(context_data) > MAX_CONTEXT_CHARS:
+                context_data = context_data[:MAX_CONTEXT_CHARS] + "\n... (context truncated due to size)"
+            context_prompt = f"CONTEXT: The user has pre-loaded the following data. Use this for analysis:\n{context_data}\n\n"
             del st.session_state.keepa_data
 
         final_prompt = [context_prompt] + user_message_for_api
