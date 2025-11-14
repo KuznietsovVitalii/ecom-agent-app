@@ -25,11 +25,12 @@ if GEMINI_API_KEY:
 # --- Helper & Tool Functions ---
 def google_web_search(query: str) -> str:
     """
-    Performs a web search for the given query. Use this to get current information, like today's date.
+    Performs a web search to get the current date. Use this ONLY when asked for today's date or similar real-time date/time questions.
+    For general product information, rely on the provided Keepa data context.
     """
     if "current date" in query.lower() or "today" in query.lower() or "date" in query.lower():
         return datetime.now().strftime("%Y-%m-%d")
-    return f"Simulated web search results for '{query}': No real-time data available for this query."
+    return f"This tool can only fetch the current date. It cannot perform a general web search for '{query}'."
 
 def convert_keepa_time(keepa_timestamp):
     try:
@@ -77,18 +78,9 @@ def get_product_info(api_key, asins, domain_id=1, **kwargs):
     except requests.RequestException as e:
         return {"error": str(e)}
 
-def get_best_sellers(api_key, category_id, domain_id=1):
-    if not api_key: return {"error": "Keepa API Key not provided."}
-    try:
-        response = requests.get(f"{KEEPA_BASE_URL}/bestsellers", params={'key': api_key, 'domain': domain_id, 'category': category_id})
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        return {"error": str(e)}
-
 # --- Main App Layout ---
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v5")
+st.title("E-commerce Analysis Agent v6")
 
 if not GEMINI_API_KEY or not KEEPA_API_KEY:
     st.error("API keys are not configured. Please add them in the sidebar.")
@@ -99,7 +91,6 @@ tab1, tab2 = st.tabs(["Keepa Tools", "Chat with Agent"])
 
 with tab1:
     st.header("Keepa Tools")
-    # ... (Keepa tools UI is unchanged)
     with st.expander("Check API Token Status"):
         if st.button("Check Tokens"):
             with st.spinner("Checking..."):
@@ -109,22 +100,22 @@ with tab1:
                     st.success(f"Tokens remaining: {status.get('tokensLeft')}")
                     st.json(status)
     with st.expander("Product Lookup", expanded=True):
-        asins_input = st.text_input("Enter ASIN(s) (comma-separated)", "B00NLLUMOE,B07W7Q3G5R")
+        asins_input = st.text_input("Enter ASIN(s)", "B00NLLUMOE,B07W7Q3G5R")
         selected_domain = st.selectbox("Amazon Domain", options=list(domain_options.keys()), index=0)
         st.subheader("Optional Parameters:")
         c1, c2, c3 = st.columns(3)
         with c1:
-            p_stats = st.checkbox("Include Stats (90 days)", True)
-            p_history = st.checkbox("Include History", False)
-            p_offers = st.checkbox("Include Offers", False)
+            p_stats = st.checkbox("Stats (90 days)", True)
+            p_history = st.checkbox("History", False)
+            p_offers = st.checkbox("Offers", False)
         with c2:
-            p_days = st.number_input("Limit History (days, 0=all)", 0, 1000, 0)
-            p_update = st.number_input("Force Refresh (hours, -1=no)", -1, 24, 1)
+            p_days = st.number_input("History (days)", 0, 1000, 0)
+            p_update = st.number_input("Refresh (hours)", -1, 24, 1)
         with c3:
-            p_buybox = st.checkbox("Include Buy Box", False)
-            p_rating = st.checkbox("Include Rating/Reviews", True)
+            p_buybox = st.checkbox("Buy Box", False)
+            p_rating = st.checkbox("Rating/Reviews", True)
         if st.button("Get Product Info"):
-            with st.spinner("Fetching product data..."):
+            with st.spinner("Fetching..."):
                 product_data = get_product_info(
                     KEEPA_API_KEY, asins_input, domain_options[selected_domain],
                     stats_days=90 if p_stats else 0, include_history=p_history,
@@ -134,12 +125,12 @@ with tab1:
                 if "error" in product_data: st.error(f"Error: {product_data['error']}")
                 elif not product_data.get('products'): st.warning("No products found.")
                 else:
-                    st.success("Data fetched! It's now available for the chat agent.")
+                    st.success("Data fetched and available to the chat agent.")
                     st.session_state.keepa_data = format_keepa_data(product_data.get('products'))
 
 with tab2:
     st.header("Chat with E-commerce Expert")
-    st.info("Ask for analysis on the data you fetched, or ask for the current date.")
+    st.info("Ask for analysis on Keepa data, or ask for the current date.")
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -157,11 +148,9 @@ with tab2:
         
         user_message_for_api = []
         user_message_for_history = []
-
         if prompt.text:
             user_message_for_api.append(prompt.text)
             user_message_for_history.append(prompt.text)
-
         if prompt.files:
             for uploaded_file in prompt.files:
                 image_bytes = uploaded_file.getvalue()
@@ -171,7 +160,7 @@ with tab2:
         st.session_state.messages.append({"role": "user", "content": user_message_for_history})
 
         try:
-            system_instruction = "You are an expert e-commerce analyst. Your own knowledge is outdated. To get the current date or any real-time information, you MUST use the 'google_web_search' tool. Do not rely on your internal knowledge for dates."
+            system_instruction = "You are an expert e-commerce analyst. Your own knowledge is outdated. To get the current date, you MUST use the 'google_web_search' tool. Do not rely on your internal knowledge for dates. If Keepa data is provided, base your analysis on it."
             model = genai.GenerativeModel(
                 'gemini-flash-latest',
                 tools=[google_web_search],
@@ -189,37 +178,45 @@ with tab2:
 
             final_prompt = [context_prompt] + user_message_for_api
             
-            # Initial call to the model
             response = model.generate_content(final_prompt)
             
-            # === THIS IS THE NEW LOGIC TO HANDLE FUNCTION CALLS ===
-            while response.candidates[0].content.parts[0].function_call:
-                function_call = response.candidates[0].content.parts[0].function_call
-                function_name = function_call.name
-                
-                # Call the appropriate function
-                if function_name == "google_web_search":
-                    function_args = {key: value for key, value in function_call.args.items()}
-                    tool_result = google_web_search(**function_args)
+            # === ROBUST FUNCTION CALLING LOGIC ===
+            if not response.candidates:
+                 assistant_response = "I'm sorry, I couldn't generate a response. Please try again."
+            else:
+                candidate = response.candidates[0]
+                if not candidate.content.parts:
+                    assistant_response = "I'm sorry, I received an empty response. Please try again."
                 else:
-                    # Handle other potential tools or errors
-                    tool_result = f"Error: Unknown tool '{function_name}'"
+                    # Check for function call
+                    if candidate.content.parts[0].function_call:
+                        function_call = candidate.content.parts[0].function_call
+                        function_name = function_call.name
+                        
+                        if function_name == "google_web_search":
+                            function_args = {key: value for key, value in function_call.args.items()}
+                            tool_result = google_web_search(**function_args)
+                        else:
+                            tool_result = f"Error: Unknown tool '{function_name}'"
 
-                # Send the tool's result back to the model
-                response = model.generate_content(
-                    final_prompt + [
-                        genai.protos.Part(function_call=function_call),
-                        genai.protos.Part(
-                            function_response=genai.protos.FunctionResponse(
-                                name=function_name,
-                                response={"result": tool_result},
-                            )
-                        ),
-                    ]
-                )
-            # =======================================================
+                        # Send the tool's result back to the model
+                        second_response = model.generate_content(
+                            final_prompt + [
+                                genai.protos.Part(function_call=function_call),
+                                genai.protos.Part(
+                                    function_response=genai.protos.FunctionResponse(
+                                        name=function_name,
+                                        response={"result": tool_result},
+                                    )
+                                ),
+                            ]
+                        )
+                        assistant_response = second_response.text
+                    else:
+                        # No function call, just get the text
+                        assistant_response = response.text
+            # =======================================
 
-            assistant_response = response.text
             st.session_state.messages.append({"role": "assistant", "content": assistant_response})
             st.rerun()
 
