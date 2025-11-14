@@ -23,21 +23,29 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 # --- Keepa API Functions (used by tools) ---
-def get_product_info(api_key, asins, domain_id=1, **kwargs):
+def get_product_info(api_key, asins, domain_id=1, stats_days=None, include_rating=False):
     if not api_key: return {"error": "Keepa API Key not provided."}
-    if isinstance(asins, str):
-        asins = [asin.strip() for asin in asins.split(',')]
     
+    # Ensure asins is a list of strings
+    if isinstance(asins, str):
+        asins = [s.strip() for s in asins.split(',') if s.strip()]
+    
+    if not asins:
+        return {"error": "ASIN parameter is empty."}
+
     params = {'key': api_key, 'domain': domain_id, 'asin': ','.join(asins)}
-    if kwargs.get('stats_days'): params['stats'] = kwargs['stats_days']
-    if kwargs.get('include_rating'): params['rating'] = 1 # Always include rating for agent
+    if stats_days:
+        params['stats'] = stats_days
+    if include_rating:
+        params['rating'] = 1
     
     try:
         response = requests.get(f"{KEEPA_BASE_URL}/product", params=params)
         response.raise_for_status()
         return response.json()
     except requests.RequestException as e:
-        return {"error": str(e)}
+        error_detail = f"API request failed with status {e.response.status_code if e.response else 'N/A'}. Reason: {e}"
+        return {"error": error_detail}
 
 # --- Agent Tools ---
 def google_web_search(query: str) -> str:
@@ -53,7 +61,9 @@ def get_amazon_product_details(asin: str, domain_id: int = 1) -> dict:
     Fetches detailed information for a given Amazon product ASIN. 
     Use this tool if the user asks a question about a specific product and you don't have the information.
     """
-    # Use the globally available KEEPA_API_KEY
+    if not asin or not isinstance(asin, str) or len(asin) < 10:
+        return {"error": f"Invalid ASIN provided: '{asin}'. Please provide a valid 10-character ASIN."}
+        
     product_data = get_product_info(
         api_key=KEEPA_API_KEY,
         asins=asin,
@@ -63,26 +73,9 @@ def get_amazon_product_details(asin: str, domain_id: int = 1) -> dict:
     )
     return product_data
 
-# --- Helper Functions ---
-def format_keepa_data(data):
-    # This function is now less critical as the agent will see raw data, but good to have
-    if isinstance(data, dict):
-        return {convert_keepa_time(k) if isinstance(k, int) else k: format_keepa_data(v) for k, v in data.items()}
-    elif isinstance(data, list):
-        return [format_keepa_data(item) for item in data]
-    else:
-        return data
-
-def convert_keepa_time(keepa_timestamp):
-    try:
-        ts = int(keepa_timestamp)
-        return (datetime(2000, 1, 1) + timedelta(minutes=ts)).strftime('%Y-%m-%d %H:%M')
-    except (ValueError, TypeError):
-        return keepa_timestamp
-
 # --- Main App Layout ---
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v7")
+st.title("E-commerce Analysis Agent v8")
 
 if not GEMINI_API_KEY or not KEEPA_API_KEY:
     st.error("API keys are not configured. Please add them in the sidebar.")
