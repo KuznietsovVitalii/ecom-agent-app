@@ -4,51 +4,12 @@ import pandas as pd
 import json
 from datetime import datetime, timedelta
 import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
+# --- Constants and API Key Management ---
 KEEPA_BASE_URL = "https://api.keepa.com"
 
-def get_token_status(api_key):
-    """Checks the status of the Keepa API key."""
-    try:
-        response = requests.get(f"{KEEPA_BASE_URL}/token", params={'key': api_key})
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        return {"error": str(e)}
-
-def convert_keepa_time(keepa_timestamp):
-    """Converts a Keepa integer timestamp (minutes since 2000-01-01) to a formatted string."""
-    try:
-        ts = int(keepa_timestamp)
-        return (datetime(2000, 1, 1) + timedelta(minutes=ts)).strftime('%Y-%m-%d %H:%M')
-    except (ValueError, TypeError):
-        return keepa_timestamp
-
-def format_keepa_data(data):
-    """Recursively formats Keepa data, converting integer dictionary keys to dates."""
-    if isinstance(data, dict):
-        new_dict = {}
-        for k, v in data.items():
-            new_key = k
-            if isinstance(k, int):
-                try:
-                    new_key = convert_keepa_time(k)
-                except (ValueError, TypeError):
-                    pass
-            new_dict[new_key] = format_keepa_data(v)
-        return new_dict
-    elif isinstance(data, list):
-        return [format_keepa_data(item) if isinstance(item, (dict, list)) else item for item in data]
-    else:
-        return data
-
-st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v2")
-
-# --- API Key Management ---
-GEMINI_API_KEY = ""
-KEEPA_API_KEY = ""
-
+# Try to get keys from Streamlit secrets first, then fall back to sidebar input
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     KEEPA_API_KEY = st.secrets["KEEPA_API_KEY"]
@@ -59,41 +20,49 @@ except (FileNotFoundError, KeyError):
     GEMINI_API_KEY = st.sidebar.text_input("Gemini API Key", type="password", key="gemini_api_key_local")
     KEEPA_API_KEY = st.sidebar.text_input("Keepa API Key", type="password", key="keepa_api_key_local")
 
-if not GEMINI_API_KEY or not KEEPA_API_KEY:
-    st.info("Please add your API keys in the sidebar to begin.")
-    st.stop()
+# Configure Gemini API
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
-# Define domain options globally
-domain_options = {
-    'USA (.com)': 1, 'Germany (.de)': 3, 'UK (.co.uk)': 2, 'Canada (.ca)': 4,
-    'France (.fr)': 5, 'Spain (.es)': 6, 'Italy (.it)': 7, 'Japan (.co.jp)': 8,
-    'Mexico (.com.mx)': 11
-}
+# --- Helper Functions ---
+def convert_keepa_time(keepa_timestamp):
+    try:
+        ts = int(keepa_timestamp)
+        return (datetime(2000, 1, 1) + timedelta(minutes=ts)).strftime('%Y-%m-%d %H:%M')
+    except (ValueError, TypeError):
+        return keepa_timestamp
 
-def get_product_info(api_key, asins, domain_id=1, stats_days=90, include_history=False, limit_days=None, include_offers=False, include_buybox=False, include_rating=False, force_update_hours=1):
-    """Looks up detailed product information by ASINs with configurable parameters."""
+def format_keepa_data(data):
+    if isinstance(data, dict):
+        return {convert_keepa_time(k) if isinstance(k, int) else k: format_keepa_data(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [format_keepa_data(item) for item in data]
+    else:
+        return data
+
+# --- Keepa API Functions ---
+def get_token_status(api_key):
+    if not api_key: return {"error": "Keepa API Key not provided."}
+    try:
+        response = requests.get(f"{KEEPA_BASE_URL}/token", params={'key': api_key})
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        return {"error": str(e)}
+
+def get_product_info(api_key, asins, domain_id=1, **kwargs):
+    if not api_key: return {"error": "Keepa API Key not provided."}
     if isinstance(asins, str):
         asins = [asin.strip() for asin in asins.split(',')]
-
-    params = {
-        'key': api_key,
-        'domain': domain_id,
-        'asin': ','.join(asins),
-    }
-
-    if stats_days is not None and stats_days > 0:
-        params['stats'] = stats_days
-    params['history'] = 1 if include_history else 0
-    if limit_days is not None and limit_days > 0:
-        params['days'] = limit_days
-    if include_offers:
-        params['offers'] = 100
-    if include_buybox:
-        params['buybox'] = 1
-    if include_rating:
-        params['rating'] = 1
-    if force_update_hours is not None and force_update_hours >= -1:
-        params['update'] = force_update_hours
+    
+    params = {'key': api_key, 'domain': domain_id, 'asin': ','.join(asins)}
+    if kwargs.get('stats_days'): params['stats'] = kwargs['stats_days']
+    if kwargs.get('include_history'): params['history'] = 1
+    if kwargs.get('limit_days'): params['days'] = kwargs['limit_days']
+    if kwargs.get('include_offers'): params['offers'] = 100
+    if kwargs.get('include_buybox'): params['buybox'] = 1
+    if kwargs.get('include_rating'): params['rating'] = 1
+    if kwargs.get('force_update_hours') is not None: params['update'] = kwargs['force_update_hours']
 
     try:
         response = requests.get(f"{KEEPA_BASE_URL}/product", params=params)
@@ -103,194 +72,146 @@ def get_product_info(api_key, asins, domain_id=1, stats_days=90, include_history
         return {"error": str(e)}
 
 def get_best_sellers(api_key, category_id, domain_id=1):
-    """Fetches best sellers for a given category ID."""
+    if not api_key: return {"error": "Keepa API Key not provided."}
     try:
-        response = requests.get(f"{KEEPA_BASE_URL}/bestsellers", params={
-            'key': api_key,
-            'domain': domain_id,
-            'category': category_id
-        })
+        response = requests.get(f"{KEEPA_BASE_URL}/bestsellers", params={'key': api_key, 'domain': domain_id, 'category': category_id})
         response.raise_for_status()
         return response.json()
     except requests.RequestException as e:
         return {"error": str(e)}
 
-def find_products(api_key, domain_id=1, selection_params={}):
-    """Finds products based on various criteria."""
-    try:
-        params = {
-            'key': api_key,
-            'domain': domain_id,
-            'selection': json.dumps(selection_params)
-        }
-        response = requests.get(f"{KEEPA_BASE_URL}/query", params=params)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        return {"error": str(e)}
+# --- Main App Layout ---
+st.set_page_config(layout="wide")
+st.title("E-commerce Analysis Agent v3")
 
-def call_keepa_product_finder(query_json: dict, domain_id: int = 1):
-    """Calls the Keepa Product Finder API."""
-    return find_products(KEEPA_API_KEY, domain_id, query_json)
+if not GEMINI_API_KEY or not KEEPA_API_KEY:
+    st.error("API keys are not configured. Please add them in the sidebar.")
+    st.stop()
 
-def google_web_search(query: str) -> str:
-    """Performs a web search."""
-    if "current date" in query.lower() or "current time" in query.lower() or "today's date" in query.lower():
-        return datetime.now().strftime("%Y-%m-%d")
-    return f"Web search results for '{query}': [Simulated search result for real-time data]"
-
+domain_options = {'USA (.com)': 1, 'Germany (.de)': 3, 'UK (.co.uk)': 2, 'Canada (.ca)': 4, 'France (.fr)': 5, 'Spain (.es)': 6, 'Italy (.it)': 7, 'Japan (.co.jp)': 8, 'Mexico (.com.mx)': 11}
 tab1, tab2 = st.tabs(["Keepa Tools", "Chat with Agent"])
 
+# --- Keepa Tools Tab ---
 with tab1:
     st.header("Keepa Tools")
-    st.write("Direct access to Keepa API functions.")
+    st.write("Direct access to Keepa API functions to load data for the agent.")
 
     with st.expander("Check API Token Status"):
         if st.button("Check Tokens"):
             with st.spinner("Checking..."):
                 status = get_token_status(KEEPA_API_KEY)
-                if "error" in status:
-                    st.error(f"Error: {status['error']}")
+                if "error" in status: st.error(f"Error: {status['error']}")
                 else:
                     st.success(f"Tokens remaining: {status.get('tokensLeft')}")
                     st.json(status)
 
-    with st.expander("Best Sellers"):
-        category_id_input = st.text_input("Enter Category ID", "281052")
-        bs_domain = st.selectbox("Amazon Domain (Best Sellers)", options=list(domain_options.keys()), index=0)
-        if st.button("Find Best Sellers"):
-            with st.spinner("Finding best sellers..."):
-                domain_id = domain_options[bs_domain]
-                bs_data = get_best_sellers(KEEPA_API_KEY, category_id_input, domain_id)
-                if "error" in bs_data:
-                    st.error(f"Error: {bs_data['error']}")
-                elif not bs_data.get('bestSellersList'):
-                    st.warning("No best sellers found for this category.")
-                else:
-                    st.success(f"Found {len(bs_data['bestSellersList'])} best sellers.")
-                    df = pd.DataFrame(bs_data['bestSellersList'])
-                    st.dataframe(df)
-                    st.session_state.keepa_data = df.to_dict('records')
-                    st.write("Best seller list is available in the chat agent for analysis.")
-
-with tab2:
-    st.header("Chat with Keepa Expert Agent")
-    st.info("Ask the AI agent anything. Use the 'Keepa Tools' tab to load data, then ask for analysis here.")
-
     with st.expander("Product Lookup", expanded=True):
         asins_input = st.text_input("Enter ASIN(s) (comma-separated)", "B00NLLUMOE,B07W7Q3G5R")
         selected_domain = st.selectbox("Amazon Domain", options=list(domain_options.keys()), index=0)
-
-        st.subheader("Optional Keepa API Parameters:")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            include_stats = st.checkbox("Include Stats (last 90 days)", value=True)
-            include_history = st.checkbox("Include History (csv, salesRanks, etc.)", value=False)
-            include_offers = st.checkbox("Include Offers (additional token cost)", value=False)
-        with col2:
-            limit_days = st.number_input("Limit History to last X days (0 for all)", min_value=0, value=0)
-            force_update_hours = st.number_input("Force Refresh if older than X hours (0 for always live, -1 for no update)", min_value=-1, value=1)
-        with col3:
-            include_buybox = st.checkbox("Include Buy Box data (additional token cost)", value=False)
-            include_rating = st.checkbox("Include Rating & Review Count History (may consume extra token)", value=False)
+        
+        st.subheader("Optional Parameters:")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            p_stats = st.checkbox("Include Stats (90 days)", True)
+            p_history = st.checkbox("Include History", False)
+            p_offers = st.checkbox("Include Offers", False)
+        with c2:
+            p_days = st.number_input("Limit History (days, 0=all)", 0, 1000, 0)
+            p_update = st.number_input("Force Refresh (hours, -1=no)", -1, 24, 1)
+        with c3:
+            p_buybox = st.checkbox("Include Buy Box", False)
+            p_rating = st.checkbox("Include Rating/Reviews", True)
 
         if st.button("Get Product Info"):
             with st.spinner("Fetching product data..."):
-                domain_id = domain_options[selected_domain]
-                stats_param = 90 if include_stats else None
                 product_data = get_product_info(
-                    KEEPA_API_KEY,
-                    asins_input,
-                    domain_id,
-                    stats_days=stats_param,
-                    include_history=include_history,
-                    limit_days=limit_days,
-                    include_offers=include_offers,
-                    include_buybox=include_buybox,
-                    include_rating=include_rating,
-                    force_update_hours=force_update_hours
+                    KEEPA_API_KEY, asins_input, domain_options[selected_domain],
+                    stats_days=90 if p_stats else 0, include_history=p_history,
+                    limit_days=p_days, include_offers=p_offers, include_buybox=p_buybox,
+                    include_rating=p_rating, force_update_hours=p_update
                 )
-
-                if "error" in product_data:
-                    st.error(f"Error: {product_data['error']}")
-                elif not product_data.get('products'):
-                    st.warning("No products found for the given ASINs.")
+                if "error" in product_data: st.error(f"Error: {product_data['error']}")
+                elif not product_data.get('products'): st.warning("No products found.")
                 else:
-                    st.success("Data fetched successfully! Data is now available for the chat agent.")
-                    formatted_products = format_keepa_data(product_data.get('products'))
-                    st.session_state.keepa_data = formatted_products
+                    st.success("Data fetched! It's now available for the chat agent.")
+                    st.session_state.keepa_data = format_keepa_data(product_data.get('products'))
 
+# --- Chat Agent Tab ---
+with tab2:
+    st.header("Chat with E-commerce Expert")
+    st.info("Ask for analysis on the data you fetched, or upload an image of a product.")
+
+    # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
+    # Display chat messages from history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+            # Handle complex user messages (text + images)
+            if isinstance(message["content"], list):
+                for part in message["content"]:
+                    if isinstance(part, str):
+                        st.markdown(part)
+                    elif isinstance(part, dict) and "data" in part:
+                        st.image(part["data"])
+            # Handle simple assistant messages
+            else:
+                st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ask for analysis on the data you fetched..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+    # Accept user input
+    if prompt := st.chat_input("Ask a question or upload an image...", accept_file=True, file_type=["jpg", "jpeg", "png"]):
+        
+        # --- Prepare user message for both history and API ---
+        user_message_for_api = []
+        user_message_for_history = []
 
-        with st.chat_message("assistant"):
-            with st.spinner("Agent is thinking..."):
-                message_placeholder = st.empty()
-                try:
-                    genai.configure(api_key=GEMINI_API_KEY)
-                    model = genai.GenerativeModel(
-                        'gemini-flash-latest',
-                        tools=[call_keepa_product_finder]
-                    )
+        # Add text part
+        if prompt.text:
+            user_message_for_api.append(prompt.text)
+            user_message_for_history.append(prompt.text)
 
-                    system_prompt = """You are an expert e-commerce analyst...""" # Truncated for brevity
+        # Handle file uploads
+        if prompt.files:
+            for uploaded_file in prompt.files:
+                image_bytes = uploaded_file.getvalue()
+                user_message_for_api.append({"mime_type": uploaded_file.type, "data": image_bytes})
+                user_message_for_history.append({"mime_type": uploaded_file.type, "data": image_bytes})
+        
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": user_message_for_history})
 
-                    history_for_gemini = [
-                        {"role": "user", "parts": [{"text": system_prompt}]},
-                        {"role": "model", "parts": [{"text": "Understood."}]}
-                    ]
-                    for msg in st.session_state.messages[-10:]:
-                        role = "user" if msg["role"] == "user" else "model"
-                        history_for_gemini.append({"role": role, "parts": [{"text": msg["content"]}]})
+        # --- Call Gemini API ---
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            
+            # Prepend Keepa data context if it exists
+            context_prompt = ""
+            if "keepa_data" in st.session_state and st.session_state.keepa_data:
+                context_data = json.dumps(st.session_state.keepa_data, indent=2)
+                MAX_CONTEXT_CHARS = 50000
+                if len(context_data) > MAX_CONTEXT_CHARS:
+                    context_data = context_data[:MAX_CONTEXT_CHARS] + "\n... (context truncated)"
+                context_prompt = f"Use the following Keepa data as context for your analysis:\n\n--- Keepa Data Context ---\n{context_data}\n\n"
+                del st.session_state.keepa_data # Clean up context after using
 
-                    if "keepa_data" in st.session_state and st.session_state.keepa_data:
-                        context_data = json.dumps(st.session_state.keepa_data, indent=2)
-                        MAX_CONTEXT_CHARS = 50000
-                        if len(context_data) > MAX_CONTEXT_CHARS:
-                            context_data = context_data[:MAX_CONTEXT_CHARS] + "\n... (context truncated)"
-                        for item in reversed(history_for_gemini):
-                            if item['role'] == 'user':
-                                item['parts'][0]['text'] += f"\n\n--- Keepa Data Context ---\n{context_data}"
-                                break
-                        del st.session_state.keepa_data
+            final_prompt = [context_prompt] + user_message_for_api
+            
+            response = model.generate_content(
+                final_prompt,
+                safety_settings={
+                    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+                }
+            )
+            
+            assistant_response = response.text
+            st.session_state.messages.append({"role": "assistant", "content": assistant_response})
+            st.rerun()
 
-                    response = model.generate_content(history_for_gemini)
-
-                    if response.candidates[0].content.parts[0].function_call:
-                        function_call = response.candidates[0].content.parts[0].function_call
-                        function_name = function_call.name
-                        function_args = {k: v for k, v in function_call.args.items()}
-
-                        if function_name == "call_keepa_product_finder":
-                            st.info(f"Agent is calling tool: {function_name} with args: {function_args}")
-                            tool_output = call_keepa_product_finder(**function_args)
-                            st.session_state.keepa_query_results = tool_output
-                            
-                            tool_response = model.generate_content(
-                                history_for_gemini + [
-                                    {"role": "model", "parts": [function_call]},
-                                    {"role": "tool", "parts": [{"text": json.dumps(tool_output)}]}
-                                ]
-                            )
-                            full_response = tool_response.candidates[0].content.parts[0].text
-                        else:
-                            full_response = f"Agent tried to call an unknown tool: {function_name}"
-                    else:
-                        full_response = response.candidates[0].content.parts[0].text
-                    
-                    message_placeholder.markdown(full_response)
-                    st.session_state.messages.append({"role": "assistant", "content": full_response})
-
-                except Exception as e:
-                    error_message = f"An unexpected error occurred: {e}"
-                    message_placeholder.error(error_message)
-                    st.session_state.messages.append({"role": "assistant", "content": error_message})
+        except Exception as e:
+            error_message = f"An unexpected error occurred with the AI model: {e}"
+            st.session_state.messages.append({"role": "assistant", "content": error_message})
+            st.rerun()
