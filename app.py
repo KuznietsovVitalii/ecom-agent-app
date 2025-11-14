@@ -183,7 +183,7 @@ with tab2:
 
         # --- Call Gemini API ---
         try:
-            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            model = genai.GenerativeModel('gemini-flash-latest')
             
             # Prepend Keepa data context if it exists
             context_prompt = ""
