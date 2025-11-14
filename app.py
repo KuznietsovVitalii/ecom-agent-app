@@ -9,7 +9,6 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 # --- Constants and API Key Management ---
 KEEPA_BASE_URL = "https://api.keepa.com"
 
-# Try to get keys from Streamlit secrets first, then fall back to sidebar input
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     KEEPA_API_KEY = st.secrets["KEEPA_API_KEY"]
@@ -20,11 +19,20 @@ except (FileNotFoundError, KeyError):
     GEMINI_API_KEY = st.sidebar.text_input("Gemini API Key", type="password", key="gemini_api_key_local")
     KEEPA_API_KEY = st.sidebar.text_input("Keepa API Key", type="password", key="keepa_api_key_local")
 
-# Configure Gemini API
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# --- Helper Functions ---
+# --- Helper & Tool Functions ---
+@genai.tool
+def google_web_search(query: str) -> str:
+    """
+    Performs a web search for the given query. Use this to get current information, like today's date.
+    """
+    if "current date" in query.lower() or "today" in query.lower() or "date" in query.lower():
+        return datetime.now().strftime("%Y-%m-%d")
+    # In a real scenario, this would call a real search API.
+    return f"Simulated web search results for '{query}': No real-time data available for this query."
+
 def convert_keepa_time(keepa_timestamp):
     try:
         ts = int(keepa_timestamp)
@@ -82,7 +90,7 @@ def get_best_sellers(api_key, category_id, domain_id=1):
 
 # --- Main App Layout ---
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v3")
+st.title("E-commerce Analysis Agent v4")
 
 if not GEMINI_API_KEY or not KEEPA_API_KEY:
     st.error("API keys are not configured. Please add them in the sidebar.")
@@ -139,53 +147,45 @@ with tab1:
 # --- Chat Agent Tab ---
 with tab2:
     st.header("Chat with E-commerce Expert")
-    st.info("Ask for analysis on the data you fetched, or upload an image of a product.")
+    st.info("Ask for analysis on the data you fetched, or ask for the current date.")
 
-    # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Display chat messages from history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            # Handle complex user messages (text + images)
             if isinstance(message["content"], list):
                 for part in message["content"]:
-                    if isinstance(part, str):
-                        st.markdown(part)
-                    elif isinstance(part, dict) and "data" in part:
-                        st.image(part["data"])
-            # Handle simple assistant messages
+                    if isinstance(part, str): st.markdown(part)
+                    elif isinstance(part, dict) and "data" in part: st.image(part["data"])
             else:
                 st.markdown(message["content"])
 
-    # Accept user input
     if prompt := st.chat_input("Ask a question or upload an image...", accept_file=True, file_type=["jpg", "jpeg", "png"]):
         
-        # --- Prepare user message for both history and API ---
         user_message_for_api = []
         user_message_for_history = []
 
-        # Add text part
         if prompt.text:
             user_message_for_api.append(prompt.text)
             user_message_for_history.append(prompt.text)
 
-        # Handle file uploads
         if prompt.files:
             for uploaded_file in prompt.files:
                 image_bytes = uploaded_file.getvalue()
                 user_message_for_api.append({"mime_type": uploaded_file.type, "data": image_bytes})
                 user_message_for_history.append({"mime_type": uploaded_file.type, "data": image_bytes})
         
-        # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": user_message_for_history})
 
-        # --- Call Gemini API ---
         try:
-            model = genai.GenerativeModel('gemini-flash-latest')
+            system_instruction = "You are an expert e-commerce analyst. Your own knowledge is outdated. To get the current date or any real-time information, you MUST use the 'google_web_search' tool. Do not rely on your internal knowledge for dates."
+            model = genai.GenerativeModel(
+                'gemini-flash-latest',
+                tools=[google_web_search],
+                system_instruction=system_instruction
+            )
             
-            # Prepend Keepa data context if it exists
             context_prompt = ""
             if "keepa_data" in st.session_state and st.session_state.keepa_data:
                 context_data = json.dumps(st.session_state.keepa_data, indent=2)
@@ -193,19 +193,11 @@ with tab2:
                 if len(context_data) > MAX_CONTEXT_CHARS:
                     context_data = context_data[:MAX_CONTEXT_CHARS] + "\n... (context truncated)"
                 context_prompt = f"Use the following Keepa data as context for your analysis:\n\n--- Keepa Data Context ---\n{context_data}\n\n"
-                del st.session_state.keepa_data # Clean up context after using
+                del st.session_state.keepa_data
 
             final_prompt = [context_prompt] + user_message_for_api
             
-            response = model.generate_content(
-                final_prompt,
-                safety_settings={
-                    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                }
-            )
+            response = model.generate_content(final_prompt)
             
             assistant_response = response.text
             st.session_state.messages.append({"role": "assistant", "content": assistant_response})
