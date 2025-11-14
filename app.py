@@ -29,7 +29,6 @@ def google_web_search(query: str) -> str:
     """
     if "current date" in query.lower() or "today" in query.lower() or "date" in query.lower():
         return datetime.now().strftime("%Y-%m-%d")
-    # In a real scenario, this would call a real search API.
     return f"Simulated web search results for '{query}': No real-time data available for this query."
 
 def convert_keepa_time(keepa_timestamp):
@@ -89,7 +88,7 @@ def get_best_sellers(api_key, category_id, domain_id=1):
 
 # --- Main App Layout ---
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v4")
+st.title("E-commerce Analysis Agent v5")
 
 if not GEMINI_API_KEY or not KEEPA_API_KEY:
     st.error("API keys are not configured. Please add them in the sidebar.")
@@ -98,11 +97,9 @@ if not GEMINI_API_KEY or not KEEPA_API_KEY:
 domain_options = {'USA (.com)': 1, 'Germany (.de)': 3, 'UK (.co.uk)': 2, 'Canada (.ca)': 4, 'France (.fr)': 5, 'Spain (.es)': 6, 'Italy (.it)': 7, 'Japan (.co.jp)': 8, 'Mexico (.com.mx)': 11}
 tab1, tab2 = st.tabs(["Keepa Tools", "Chat with Agent"])
 
-# --- Keepa Tools Tab ---
 with tab1:
     st.header("Keepa Tools")
-    st.write("Direct access to Keepa API functions to load data for the agent.")
-
+    # ... (Keepa tools UI is unchanged)
     with st.expander("Check API Token Status"):
         if st.button("Check Tokens"):
             with st.spinner("Checking..."):
@@ -111,11 +108,9 @@ with tab1:
                 else:
                     st.success(f"Tokens remaining: {status.get('tokensLeft')}")
                     st.json(status)
-
     with st.expander("Product Lookup", expanded=True):
         asins_input = st.text_input("Enter ASIN(s) (comma-separated)", "B00NLLUMOE,B07W7Q3G5R")
         selected_domain = st.selectbox("Amazon Domain", options=list(domain_options.keys()), index=0)
-        
         st.subheader("Optional Parameters:")
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -128,7 +123,6 @@ with tab1:
         with c3:
             p_buybox = st.checkbox("Include Buy Box", False)
             p_rating = st.checkbox("Include Rating/Reviews", True)
-
         if st.button("Get Product Info"):
             with st.spinner("Fetching product data..."):
                 product_data = get_product_info(
@@ -143,7 +137,6 @@ with tab1:
                     st.success("Data fetched! It's now available for the chat agent.")
                     st.session_state.keepa_data = format_keepa_data(product_data.get('products'))
 
-# --- Chat Agent Tab ---
 with tab2:
     st.header("Chat with E-commerce Expert")
     st.info("Ask for analysis on the data you fetched, or ask for the current date.")
@@ -196,8 +189,36 @@ with tab2:
 
             final_prompt = [context_prompt] + user_message_for_api
             
+            # Initial call to the model
             response = model.generate_content(final_prompt)
             
+            # === THIS IS THE NEW LOGIC TO HANDLE FUNCTION CALLS ===
+            while response.candidates[0].content.parts[0].function_call:
+                function_call = response.candidates[0].content.parts[0].function_call
+                function_name = function_call.name
+                
+                # Call the appropriate function
+                if function_name == "google_web_search":
+                    function_args = {key: value for key, value in function_call.args.items()}
+                    tool_result = google_web_search(**function_args)
+                else:
+                    # Handle other potential tools or errors
+                    tool_result = f"Error: Unknown tool '{function_name}'"
+
+                # Send the tool's result back to the model
+                response = model.generate_content(
+                    final_prompt + [
+                        genai.protos.Part(function_call=function_call),
+                        genai.protos.Part(
+                            function_response=genai.protos.FunctionResponse(
+                                name=function_name,
+                                response={"result": tool_result},
+                            )
+                        ),
+                    ]
+                )
+            # =======================================================
+
             assistant_response = response.text
             st.session_state.messages.append({"role": "assistant", "content": assistant_response})
             st.rerun()
