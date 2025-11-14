@@ -164,7 +164,7 @@ if prompt := st.chat_input("e.g., 'What is the rating for B00NLLUMOE?'", accept_
             if len(context_data) > MAX_CONTEXT_CHARS:
                 context_data = context_data[:MAX_CONTEXT_CHARS] + "\n... (context truncated due to size)"
             context_prompt = f"CONTEXT: The user has pre-loaded the following data. Use this for analysis:\n{context_data}\n\n"
-            del st.session_state.keepa_data
+            # del st.session_state.keepa_data #<-- This was the bug causing forgetfulness
 
         final_prompt = [context_prompt] + user_message_for_api
         
