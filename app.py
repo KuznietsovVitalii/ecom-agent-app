@@ -39,19 +39,23 @@ st.set_page_config(layout="wide")
 st.title("E-commerce Analysis Agent v2")
 
 # --- API Key Management ---
+GEMINI_API_KEY = ""
+KEEPA_API_KEY = ""
+
 try:
+    # Try to get keys from Streamlit secrets (for cloud deployment)
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     KEEPA_API_KEY = st.secrets["KEEPA_API_KEY"]
+    st.sidebar.success("API keys loaded from secrets.")
 except (FileNotFoundError, KeyError):
-    st.error("API keys (GEMINI_API_KEY, KEEPA_API_KEY) not found in Streamlit secrets. Please add them.")
-    st.info('''
-        To add secrets on Streamlit Community Cloud:
-        1. Go to your app's dashboard.
-        2. Click on 'Settings' > 'Secrets'.
-        3. Add your keys in TOML format, e.g.:
-           GEMINI_API_KEY = "your_gemini_key"
-           KEEPA_API_KEY = "your_keepa_key"
-    ''')
+    # Fallback for local development
+    st.sidebar.header("API Key Configuration")
+    st.sidebar.info("Enter your API keys below. For deployed apps, use Streamlit Secrets.")
+    GEMINI_API_KEY = st.sidebar.text_input("Gemini API Key", type="password", key="gemini_api_key_local")
+    KEEPA_API_KEY = st.sidebar.text_input("Keepa API Key", type="password", key="keepa_api_key_local")
+
+if not GEMINI_API_KEY or not KEEPA_API_KEY:
+    st.info("Please add your API keys in the sidebar to begin.")
     st.stop()
 
 # Define domain options globally
@@ -135,6 +139,18 @@ def call_keepa_product_finder(query_json: dict, domain_id: int = 1):
     """
     # Assuming KEEPA_API_KEY is accessible globally
     return find_products(KEEPA_API_KEY, domain_id, query_json)
+
+def google_web_search(query: str) -> str:
+    """
+    Performs a web search for the given query.
+    If the query is related to the current date or time, it returns the current date.
+    Otherwise, it returns a placeholder web search result.
+    """
+    if "current date" in query.lower() or "current time" in query.lower() or "today's date" in query.lower():
+        return datetime.now().strftime("%Y-%m-%d")
+    return f"Web search results for '{query}': [Simulated search result for real-time data]"
+
+# --- Gemini Model and Tools ---
 
 # --- Streamlit UI ---
 # This is a test comment to force a new commit.
