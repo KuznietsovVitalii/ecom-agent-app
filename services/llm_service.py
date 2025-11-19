@@ -3,6 +3,7 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from datetime import datetime
 import json
 import streamlit as st
+import time
 
 class LLMService:
     def __init__(self, api_key, keepa_service):
@@ -15,9 +16,19 @@ class LLMService:
     def _setup_model(self):
         system_instruction = """You are an expert e-commerce analyst and assistant. 
         You help users analyze Amazon products using Keepa data.
-        You have access to tools to fetch real-time data. 
-        Always use the 'get_amazon_product_details' tool when asked about a specific product's current data if you don't have it in context.
-        Use 'google_web_search' for current dates or general web info.
+        
+        TOOLS:
+        1. `get_amazon_product_details(asin, domain_id)`: Use this to fetch REAL-TIME price, sales, and rating data for a product. 
+           - ALWAYS use this if the user asks about a specific product (e.g., "How is B00... doing?", "Price of iPhone 13?").
+           - If the user provides an ASIN, use it directly.
+        2. `google_web_search(query)`: Use this for:
+           - Getting the current date (query="current date").
+           - Finding ASINs if the user only gives a product name (e.g., "Find ASIN for Sony WH-1000XM5").
+        
+        ANALYSIS RULES:
+        - When analyzing sales, look at 'Avg Monthly Sales' and 'BSR' (Best Sellers Rank).
+        - If data is missing, say so honestly.
+        - Be concise but professional.
         """
         return genai.GenerativeModel(
             'gemini-1.5-flash-latest',
@@ -25,117 +36,118 @@ class LLMService:
             system_instruction=system_instruction
         )
 
-    # --- Tool Definitions (for the model to see) ---
+    # --- Tool Definitions ---
     def google_web_search_tool(self, query: str) -> str:
-        """Use this ONLY when asked for today's date or similar real-time date/time questions."""
-        pass # Implementation is handled in execution logic
+        """Performs a web search. Use for finding ASINs or checking current date."""
+        pass 
 
     def get_amazon_product_details_tool(self, asin: str, domain_id: int = 1) -> dict:
-        """Fetches detailed information for a given Amazon product ASIN. Use this tool if the user asks a question about a specific product and you don't have the information."""
-        pass # Implementation is handled in execution logic
+        """Fetches detailed Keepa/Amazon data for a specific ASIN."""
+        pass 
 
-    # --- Tool Execution Logic ---
-    def _execute_google_web_search(self, query: str) -> str:
-        if "current date" in query.lower() or "today" in query.lower() or "date" in query.lower():
-            return datetime.now().strftime("%Y-%m-%d")
-        return f"This tool can only fetch the current date. It cannot perform a general web search for '{query}'."
-
-    def _execute_get_amazon_product_details(self, asin: str, domain_id: int = 1) -> dict:
-        if not asin or not isinstance(asin, str) or len(asin) < 10:
-            return {"error": f"Invalid ASIN provided: '{asin}'. Please provide a valid 10-character ASIN."}
+    # --- Tool Execution ---
+    def _execute_tool(self, function_call):
+        name = function_call.name
+        args = function_call.args
         
-        # Use the injected keepa_service
-        return self.keepa_service.get_product_info(
-            asins=asin,
-            domain_id=domain_id,
-            stats_days=None,
-            include_rating=True
-        )
+        if name == "google_web_search_tool" or name == "google_web_search":
+            query = args.get("query", "")
+            # Simple mock for date, can be expanded
+            if "date" in query.lower() or "today" in query.lower():
+                return datetime.now().strftime("%Y-%m-%d")
+            return f"Search functionality is limited. Current date is {datetime.now().strftime('%Y-%m-%d')}."
+            
+        elif name == "get_amazon_product_details_tool" or name == "get_amazon_product_details":
+            return self.keepa_service.get_product_info(
+                asins=args.get("asin"),
+                domain_id=int(args.get("domain_id", 1)),
+                stats_days=None,
+                include_rating=True
+            )
+            
+        return f"Error: Unknown tool '{name}'"
 
     def generate_response(self, messages, context_data=None):
         if not self.api_key:
             return "Gemini API Key is missing."
 
-        # Prepare prompt
-        final_prompt = []
+        # Build history for the model
+        chat_history = []
         
-        # Add context if available
+        # Add context as a system-like user message at the start if exists
         if context_data:
             context_str = json.dumps(context_data)
-            MAX_CONTEXT_CHARS = 50000 
+            MAX_CONTEXT_CHARS = 30000 
             if len(context_str) > MAX_CONTEXT_CHARS:
-                context_str = context_str[:MAX_CONTEXT_CHARS] + "\n... (context truncated)"
-            final_prompt.append(f"CONTEXT: The user has pre-loaded the following data. Use this for analysis:\n{context_str}\n\n")
+                context_str = context_str[:MAX_CONTEXT_CHARS] + "\n... (truncated)"
+            chat_history.append({
+                "role": "user",
+                "parts": [f"SYSTEM CONTEXT (Pre-loaded Data):\n{context_str}"]
+            })
+            chat_history.append({
+                "role": "model",
+                "parts": ["Understood. I will use this context for my analysis."]
+            })
 
-        # Add chat history (simplified for now, just taking the last user message or full history if needed)
-        # In this simplified version, we pass the full history as 'contents' to generate_content if we were using chat session,
-        # but the original code used a list of parts.
-        # Let's stick to the original approach: passing the last message + context.
-        # Wait, the original code appended history to `messages` list and then constructed `final_prompt`.
-        
-        # We will assume 'messages' contains the history in a format we can use, 
-        # but for `generate_content` with tools, it's often better to use `start_chat`.
-        # However, to minimize changes to logic, I'll replicate the single-turn generation with history if possible,
-        # OR just use the last message + context as the prompt.
-        
-        # The original code: `final_prompt = [context_prompt] + user_message_for_api`
-        # It seems it was stateless per request regarding the model object, but passed history?
-        # No, `user_message_for_api` was just the *current* prompt. History was stored in `st.session_state.messages` for display.
-        # So the model only saw the *current* prompt + context. It didn't see previous turns?
-        # Wait, `st.session_state.messages` is for UI.
-        # `final_prompt` only included `context_prompt` and `user_message_for_api`.
-        # So yes, it was stateless. I should probably improve this to include history, but let's stick to working logic first.
-        
-        last_user_message = messages[-1]['content'] # Assuming standard format
-        # If content is list (text + image), handle it.
-        
-        current_prompt_parts = []
-        if isinstance(last_user_message, list):
-             current_prompt_parts.extend(last_user_message)
-        else:
-             current_prompt_parts.append(last_user_message)
+        # Convert Streamlit messages to Gemini format
+        for msg in messages:
+            role = "user" if msg["role"] == "user" else "model"
+            parts = []
+            content = msg["content"]
+            
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, str):
+                        parts.append(item)
+                    elif isinstance(item, dict) and "data" in item:
+                        # Image data
+                        parts.append(genai.protos.Part(
+                            inline_data=genai.protos.Blob(
+                                mime_type=item["mime_type"],
+                                data=item["data"]
+                            )
+                        ))
+            
+            if parts:
+                chat_history.append({"role": role, "parts": parts})
 
-        final_prompt.extend(current_prompt_parts)
+        if not chat_history:
+            return "Please ask a question."
+
+        # Start chat session
+        # If history is empty (first message), start_chat(history=[])
+        # If history has items, we pass all but the last one as history, and send the last one.
+        
+        history_for_session = chat_history[:-1] if len(chat_history) > 1 else []
+        last_message = chat_history[-1]
+
+        chat = self.model.start_chat(history=history_for_session)
 
         try:
-            response = self.model.generate_content(final_prompt)
+            response = chat.send_message(last_message["parts"])
             
-            if not response.candidates:
-                return "I'm sorry, I couldn't generate a response. Please try again."
-            
-            candidate = response.candidates[0]
-            if not candidate.content.parts:
-                return "I'm sorry, I received an empty response."
-
-            # Handle Function Call
-            if candidate.content.parts[0].function_call:
-                function_call = candidate.content.parts[0].function_call
-                function_name = function_call.name
-                function_args = {key: value for key, value in function_call.args.items()}
+            # Tool Loop (Simple 1-step recursion for now)
+            if response.candidates and response.candidates[0].content.parts:
+                part = response.candidates[0].content.parts[0]
                 
-                tool_result = None
-                if function_name == "google_web_search":
-                    tool_result = self._execute_google_web_search(**function_args)
-                elif function_name == "get_amazon_product_details":
-                    tool_result = self._execute_get_amazon_product_details(**function_args)
-                else:
-                    tool_result = f"Error: Unknown tool '{function_name}'"
-
-                # Send result back to model
-                second_response = self.model.generate_content(
-                    final_prompt + [
-                        genai.protos.Part(function_call=function_call),
+                if part.function_call:
+                    # st.toast(f"🤖 Agent is using tool: {part.function_call.name}...", icon="🛠️")
+                    
+                    tool_result = self._execute_tool(part.function_call)
+                    
+                    # Send result back
+                    response = chat.send_message(
                         genai.protos.Part(
                             function_response=genai.protos.FunctionResponse(
-                                name=function_name,
-                                response={"result": tool_result},
+                                name=part.function_call.name,
+                                response={"result": tool_result}
                             )
-                        ),
-                    ]
-                )
-                return second_response.text
+                        )
+                    )
             
             return response.text
 
         except Exception as e:
-            return f"An unexpected error occurred with the AI model: {e}"
+            return f"AI Error: {str(e)}"
