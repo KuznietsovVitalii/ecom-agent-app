@@ -31,7 +31,7 @@ class LLMService:
         - Be concise but professional.
         """
         return genai.GenerativeModel(
-            'gemini-1.5-flash-latest',
+            'gemini-flash-latest',
             tools=[self.google_web_search_tool, self.get_amazon_product_details_tool],
             system_instruction=system_instruction
         )
@@ -117,9 +117,6 @@ class LLMService:
             return "Please ask a question."
 
         # Start chat session
-        # If history is empty (first message), start_chat(history=[])
-        # If history has items, we pass all but the last one as history, and send the last one.
-        
         history_for_session = chat_history[:-1] if len(chat_history) > 1 else []
         last_message = chat_history[-1]
 
@@ -133,8 +130,6 @@ class LLMService:
                 part = response.candidates[0].content.parts[0]
                 
                 if part.function_call:
-                    # st.toast(f"🤖 Agent is using tool: {part.function_call.name}...", icon="🛠️")
-                    
                     tool_result = self._execute_tool(part.function_call)
                     
                     # Send result back
