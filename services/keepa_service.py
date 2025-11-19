@@ -1,19 +1,51 @@
 import streamlit as st
 import pandas as pd
 import keepa
-import plotly.graph_objects as go
+import requests
 import numpy as np
-import time
+from datetime import datetime
 
-# Assuming KEEPA_API_KEY is available in st.secrets or passed
-try:
-    KEEPA_API_KEY = st.secrets["KEEPA_API_KEY"]
-except KeyError:
-    st.error("KEEPA_API_KEY not found in Streamlit secrets.")
-    st.stop()
+# Constants
+KEEPA_BASE_URL = "https://api.keepa.com"
+
+class KeepaService:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.api = keepa.Keepa(api_key, timeout=60)
+
+    @st.cache_data(ttl=3600)
+    def get_product_info(_self, asins, domain_id=1, **kwargs):
+        """
+        Fetches product info using direct HTTP request for flexibility.
+        Cached for 1 hour.
+        """
+        if not _self.api_key: return {"error": "Keepa API Key not provided."}
+        
+        if isinstance(asins, str):
+            asins = [s.strip() for s in asins.split(',') if s.strip()]
+        if not asins:
+            return {"error": "ASIN parameter is empty."}
+
+        params = {'key': _self.api_key, 'domain': domain_id, 'asin': ','.join(asins)}
+        if kwargs.get('stats_days'): params['stats'] = kwargs.get('stats_days')
+        if kwargs.get('include_rating'): params['rating'] = 1
+        if kwargs.get('include_history'): params['history'] = 1
+        if kwargs.get('limit_days'): params['days'] = kwargs.get('limit_days')
+        if kwargs.get('include_offers'): params['offers'] = 100
+        if kwargs.get('include_buybox'): params['buybox'] = 1
+        if kwargs.get('force_update_hours') is not None: params['update'] = kwargs.get('force_update_hours')
+        
+        try:
+            response = requests.get(f"{KEEPA_BASE_URL}/product", params=params)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            return {"error": f"API request failed with status {e.response.status_code if e.response else 'N/A'}. Reason: {e}"}
+
+    def get_keepa_product(self, asin, domain="US"):
+        return KeepaProduct(self.api_key, asin, domain)
 
 class KeepaProduct:
-    api = keepa.Keepa(KEEPA_API_KEY, timeout=60)
     # create sales ranges (min - max)
     sales_tiers: dict = {
         -1: 0,
@@ -49,7 +81,8 @@ class KeepaProduct:
         100000: 150000,
     }
 
-    def __init__(self, asin=None, domain="US"):
+    def __init__(self, api_key, asin=None, domain="US"):
+        self.api_key = api_key
         self.exists: bool = False
         self.asin: str = asin
         self.domain: str = domain
@@ -62,21 +95,7 @@ class KeepaProduct:
         self.initial_days: int = 360
         self.variations = set()
         self.avg_price = 0
-
-    def __ge__(self, other):
-        return self.max_sales >= other.max_sales
-
-    def __le__(self, other):
-        return self.max_sales <= other.max_sales
-
-    def __gt__(self, other):
-        return self.max_sales > other.max_sales
-
-    def __lt__(self, other):
-        return self.max_sales < other.max_sales
-
-    def __eq__(self, other):
-        return self.max_sales == other.max_sales
+        self.api = keepa.Keepa(api_key, timeout=60)
 
     def __str__(self, days=30):
         self.get_last_days(days=days)
@@ -100,12 +119,10 @@ class KeepaProduct:
     def query(self):
         if not self.data:
             try:
-                self.data = KeepaProduct.api.query(self.asin, domain=self.domain)
+                # Using the instance's api object
+                self.data = self.api.query(self.asin, domain=self.domain)
             except Exception:
                 self.data = [{}]
-
-    def extract_from_products(self, products: list):
-        self.data = [x for x in products if x["asin"] == self.asin]
 
     def convert_time(self, keepa_time: int) -> pd.Timestamp | str:
         """function that converts time from keepa format to datetime format"""
@@ -121,32 +138,15 @@ class KeepaProduct:
             return 0
         return KeepaProduct.sales_tiers.get(x, x * 1.3)
 
-    def get_variations(self):
-        if not self.data:
-            self.query()
-        
-        # Per user request, ensuring logic prioritizes the 'variations' field 
-        # to extract child ASINs, not 'variationsCSV'.
-        if (
-            self.data
-            and "variations" in self.data[0].keys()
-            and self.data[0]["variations"]
-        ):
-            self.variations.update([x["asin"] for x in self.data[0]["variations"]])
-            self.variation_theme_dict = [
-                theme["attributes"]
-                for theme in self.data[0]["variations"]
-                if theme["asin"] == self.asin
-            ][0]
-            self.variation_theme = {
-                x["dimension"]: x["value"] for x in self.variation_theme_dict
-            }
-
     def pull_sales(self):
         if not self.data:
             self.query()
         elif self.data == "Not found":
             return
+        
+        if not self.data or not self.data[0]:
+             return
+
         self.title = self.data[0].get("title")
         img_links = self.data[0].get("imagesCSV")
         if img_links and len(img_links.split(",")) > 0:
@@ -295,9 +295,8 @@ class KeepaProduct:
             60 * 24 * 30
         )
 
-        # lifetime = pd.date_range(self.short_history.index.min(), self.short_history.index.max(), freq='min')
         lifetime = pd.date_range(
-            (pd.to_to_datetime("today") - pd.Timedelta(days=days)).date(),
+            (pd.to_datetime("today") - pd.Timedelta(days=days)).date(),
             self.short_history.index.max(),
             freq="min",
         )
@@ -382,35 +381,6 @@ class KeepaProduct:
         self.pivot = self._format_numbers(self.pivot)
         self.pivot = self.pivot.replace(0, np.nan)
 
-    def generate_monthly_summary(self):
-        if not self.data:
-            self.generate_daily_sales(days=self.initial_days)
-        if self.data and isinstance(self.pivot, pd.DataFrame):
-            summary = self.pivot.copy()
-            summary = summary[summary.index >= pd.to_datetime("2020-01-01").date()]
-            summary["year-month"] = (
-                pd.to_datetime(summary.index).year.astype(str)
-                + "-"
-                + pd.to_datetime(summary.index).month.astype(str).zfill(2)
-            )
-            self.summary = summary.pivot_table(
-                values=["final price", "full price", "sales max", "sales min", "BSR"],
-                index="year-month",
-                aggfunc={
-                    "final price": "mean",
-                    "full price": "mean",
-                    "sales max": "sum",
-                    "sales min": "sum",
-                    "BSR": "mean",
-                },
-            )
-            self.summary[["final price", "full price"]] = self.summary[
-                ["final price", "full price"]
-            ].round(2)
-            self.summary[["BSR", "sales max", "sales min"]] = self.summary[
-                ["BSR", "sales max", "sales min"]
-            ].round(0)
-
     def get_last_days(self, days=360):
         self.generate_daily_sales(days=days)
         if not self.exists:
@@ -432,7 +402,6 @@ class KeepaProduct:
     def get_sales_history_by_date(self):
         """
         Fetches and formats the monthly sales history into a date-by-date table.
-        This logic is based on the keepa_competitor_research.py script.
         """
         if not self.data:
             self.query()
@@ -459,161 +428,3 @@ class KeepaProduct:
         history_df["Avg Sales"] = (history_df["Min Sales"] * 0.9 + history_df["Max Sales"] * 0.1).astype(int)
         
         return history_df[["Date", "Min Sales", "Max Sales", "Avg Sales"]]
-
-
-def get_products(asins: list, domain="US", update=None):
-    api = keepa.Keepa(KEEPA_API_KEY, timeout=60)
-    products = api.query(asins, domain=domain, update=update)
-    return products
-
-
-def get_tokens(api_key=KEEPA_API_KEY):
-    api = keepa.Keepa(api_key, timeout=60)
-    api.update_status()
-    return api.tokens_left
-
-
-def get_product_details(asins: list[str]):
-    api = keepa.Keepa(KEEPA_API_KEY, timeout=60)
-    tokens = api.tokens_left
-    if tokens < len(asins):
-        st.write("Please wait, not enough tokens to pull data from Amazon")
-        time.sleep(20)
-    products = api.query(asins)
-    items = {}
-    for p in products:
-        asin = p.get("asin")
-        brand = p.get("brand")
-        items[asin] = {}
-        title = p.get("title")
-        bulletpoints = p.get("features", [])
-        description = p.get("description")
-        price = p.get("data", {}).get("df_NEW").dropna().iloc[-1].values[0]
-        coupon = p.get("coupon")
-        if not coupon:
-            coupon = 0
-        else:
-            if coupon[0] < 0:
-                coupon = round(price * coupon[0] / 100, 2)
-            elif coupon[0] > 0:
-                coupon = -coupon[0] / 100
-
-        sales = p.get("monthlySold")
-        if not sales:
-            sales = 0
-
-        img_link = (
-            "https://m.media-amazon.com/images/I/"
-            + p.get("imagesCSV", "").split(",")[0]
-        )
-
-        items[asin]["brand"] = brand
-        items[asin]["title"] = title
-        items[asin]["bulletpoints"] = "\n".join(bulletpoints)
-        items[asin]["description"] = description
-        items[asin]["full price"] = price
-        items[asin]["discount"] = coupon
-        items[asin]["monthly sales"] = sales
-        items[asin]["image"] = img_link
-    return items
-
-
-def render_sales_estimator_tab():
-    st.header("Sales Estimator")
-    st.write("Enter ASINs to estimate sales and view historical data.")
-
-    # ASIN input for individual analysis
-    asin_input = st.text_input("Enter ASIN for individual analysis (e.g., B07XXXXXXX):")
-    domain_selection = st.selectbox("Select Amazon Domain", ["US", "DE", "ES", "FR", "GB", "IN", "IT", "JP", "MX", "AE", "AU", "BR", "CA", "CN"], index=0)
-
-    if st.button("Analyze Single ASIN"):
-        if asin_input:
-            with st.spinner(f"Fetching data for {asin_input}..."):
-                product = KeepaProduct(asin=asin_input, domain=domain_selection)
-                product.query()
-                if product.exists:
-                    product.get_last_days(days=360) # Get last 360 days of data
-                    st.subheader(f"Analysis for {product.title} ({product.asin})")
-                    st.image(product.image, width=150)
-                    st.write(f"**Brand:** {product.brand}")
-                    st.write(f"**Average Monthly Sales (last 30 days):** {product.avg_sales:,.0f}")
-                    st.write(f"**Average Price (last 30 days):** ${product.avg_price:,.2f}")
-                    st.write(f"**Total Sales Value (last 30 days):** ${(product.avg_sales * product.avg_price):,.0f}")
-
-                    # Plotting sales and price history
-                    if product.pivot is not None and not product.pivot.empty:
-                        fig = go.Figure()
-                        fig.add_trace(go.Scatter(x=product.pivot.index, y=product.pivot['sales max'], mode='lines', name='Max Sales'))
-                        fig.add_trace(go.Scatter(x=product.pivot.index, y=product.pivot['sales min'], mode='lines', name='Min Sales'))
-                        fig.add_trace(go.Scatter(x=product.pivot.index, y=product.pivot['final price'], mode='lines', name='Average Price', yaxis='y2'))
-
-                        fig.update_layout(
-                            title=f'Sales and Price History for {product.title}',
-                            xaxis_title='Date',
-                            yaxis_title='Estimated Sales',
-                            yaxis2=dict(title='Price ($)', overlaying='y', side='right'),
-                            legend=dict(x=0.01, y=0.99)
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.warning("No historical sales data available for plotting.")
-
-                    with st.expander("Показать детальную историю продаж по датам"):
-                        with st.spinner("Загрузка истории..."):
-                            sales_history_df = product.get_sales_history_by_date()
-                            if not sales_history_df.empty:
-                                st.dataframe(sales_history_df)
-                            else:
-                                st.write("История продаж по датам недоступна.")
-                else:
-                    st.error(f"Could not find data for ASIN: {asin_input}. Please check the ASIN and domain.")
-        else:
-            st.warning("Please enter an ASIN to analyze.")
-
-    st.markdown("---")
-
-    # Bulk ASIN analysis
-    st.subheader("Bulk ASIN Analysis")
-    bulk_asins_input = st.text_area("Enter ASINs for bulk analysis (one per line):", height=150)
-    bulk_domain_selection = st.selectbox("Select Amazon Domain for Bulk Analysis", ["US", "DE", "ES", "FR", "GB", "IN", "IT", "JP", "MX", "AE", "AU", "BR", "CA", "CN"], index=0, key="bulk_domain")
-
-    if st.button("Analyze Bulk ASINs"):
-        if bulk_asins_input:
-            asins_list = [a.strip() for a in bulk_asins_input.split('\n') if a.strip()]
-            if asins_list:
-                all_products_data = []
-                progress_bar = st.progress(0)
-                for i, asin in enumerate(asins_list):
-                    progress_bar.progress((i + 1) / len(asins_list))
-                    product = KeepaProduct(asin=asin, domain=bulk_domain_selection)
-                    product.query()
-                    if product.exists:
-                        product.get_last_days(days=30) # Get last 30 days for bulk summary
-                        all_products_data.append({
-                            "ASIN": product.asin,
-                            "Title": product.title,
-                            "Brand": product.brand,
-                            "Avg Monthly Sales": f"{product.avg_sales:,.0f}",
-                            "Avg Price": f"${product.avg_price:,.2f}",
-                            "Total Sales Value": f"${(product.avg_sales * product.avg_price):,.0f}",
-                            "Product Link": f"https://www.amazon.com/dp/{product.asin}",
-                            "Image": product.image
-                        })
-                progress_bar.empty()
-
-                if all_products_data:
-                    df_bulk = pd.DataFrame(all_products_data)
-                    st.write("### Bulk Analysis Results")
-                    st.dataframe(df_bulk)
-                    st.download_button(
-                        label="Download Bulk Data as CSV",
-                        data=df_bulk.to_csv(index=False).encode('utf-8'),
-                        file_name="bulk_asin_analysis.csv",
-                        mime="text/csv",
-                    )
-                else:
-                    st.warning("No data found for the provided ASINs.")
-            else:
-                st.warning("Please enter valid ASINs for bulk analysis.")
-        else:
-            st.warning("Please enter ASINs for bulk analysis.")
