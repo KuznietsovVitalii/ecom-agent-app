@@ -6,9 +6,14 @@ from datetime import datetime, timedelta
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# --- Constants and API Key Management ---
+# Import new services
+from services.keepa_service import KeepaService
+from services.llm_service import LLMService
+
+# --- Constants ---
 KEEPA_BASE_URL = "https://api.keepa.com"
 
+# --- API Key Management (PRESERVED ORIGINAL LOGIC) ---
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     KEEPA_API_KEY = st.secrets["KEEPA_API_KEY"]
@@ -22,50 +27,13 @@ except (FileNotFoundError, KeyError):
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# --- Keepa API Functions ---
+# Initialize services
+keepa_service = KeepaService(KEEPA_API_KEY)
+llm_service = LLMService(GEMINI_API_KEY, keepa_service) if GEMINI_API_KEY else None
+
+# --- Keepa API Functions (for manual fetching) ---
 def get_product_info(api_key, asins, domain_id=1, **kwargs):
-    if not api_key: return {"error": "Keepa API Key not provided."}
-    if isinstance(asins, str):
-        asins = [s.strip() for s in asins.split(',') if s.strip()]
-    if not asins:
-        return {"error": "ASIN parameter is empty."}
-
-    params = {'key': api_key, 'domain': domain_id, 'asin': ','.join(asins)}
-    if kwargs.get('stats_days'): params['stats'] = kwargs.get('stats_days')
-    if kwargs.get('include_rating'): params['rating'] = 1
-    if kwargs.get('include_history'): params['history'] = 1
-    if kwargs.get('limit_days'): params['days'] = kwargs.get('limit_days')
-    if kwargs.get('include_offers'): params['offers'] = 100
-    if kwargs.get('include_buybox'): params['buybox'] = 1
-    if kwargs.get('force_update_hours') is not None: params['update'] = kwargs.get('force_update_hours')
-    
-    try:
-        response = requests.get(f"{KEEPA_BASE_URL}/product", params=params)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        return {"error": f"API request failed with status {e.response.status_code if e.response else 'N/A'}. Reason: {e}"}
-
-# --- Agent Tools ---
-def google_web_search(query: str) -> str:
-    """Use this ONLY when asked for today's date or similar real-time date/time questions."""
-    if "current date" in query.lower() or "today" in query.lower() or "date" in query.lower():
-        return datetime.now().strftime("%Y-%m-%d")
-    return f"This tool can only fetch the current date. It cannot perform a general web search for '{query}'."
-
-def get_amazon_product_details(asin: str, domain_id: int = 1) -> dict:
-    """Fetches detailed information for a given Amazon product ASIN. Use this tool if the user asks a question about a specific product and you don't have the information."""
-    if not asin or not isinstance(asin, str) or len(asin) < 10:
-        return {"error": f"Invalid ASIN provided: '{asin}'. Please provide a valid 10-character ASIN."}
-    
-    product_data = get_product_info(
-        api_key=KEEPA_API_KEY,
-        asins=asin,
-        domain_id=domain_id,
-        stats_days=None, # Minimal request to avoid 400 errors on basic keys
-        include_rating=True
-    )
-    return product_data
+    return keepa_service.get_product_info(asins, domain_id, **kwargs)
 
 # --- UI Functions ---
 def clear_chat_history():
@@ -73,7 +41,7 @@ def clear_chat_history():
 
 # --- Main App Layout ---
 st.set_page_config(layout="wide")
-st.title("E-commerce Analysis Agent v10")
+st.title("E-commerce Analysis Agent v2.0 (Fixed)")
 
 if not GEMINI_API_KEY or not KEEPA_API_KEY:
     st.error("API keys are not configured. Please add them in the sidebar.")
@@ -110,8 +78,10 @@ with st.expander("Product Lookup"):
                 limit_days=p_days, include_offers=p_offers, include_buybox=p_buybox,
                 include_rating=p_rating, force_update_hours=p_update
             )
-            if "error" in product_data: st.error(f"Error: {product_data['error']}")
-            elif not product_data.get('products'): st.warning("No products found.")
+            if "error" in product_data: 
+                st.error(f"Error: {product_data['error']}")
+            elif not product_data.get('products'): 
+                st.warning("No products found.")
             else:
                 st.success("Data fetched and available to the chat agent.")
                 st.session_state.keepa_data = product_data.get('products')
@@ -148,67 +118,14 @@ if prompt := st.chat_input("e.g., 'What is the rating for B00NLLUMOE?'", accept_
     
     st.session_state.messages.append({"role": "user", "content": user_message_for_history})
 
-    try:
-        system_instruction = """You are an expert e-commerce analyst...""" # Same as before
-        model = genai.GenerativeModel(
-            'gemini-flash-latest',
-            tools=[google_web_search, get_amazon_product_details],
-            system_instruction=system_instruction
-        )
-        
-        context_prompt = ""
-        if "keepa_data" in st.session_state and st.session_state.keepa_data:
-            context_data = json.dumps(st.session_state.keepa_data)
-            # *** FIX: Truncate large context to prevent token limit errors ***
-            MAX_CONTEXT_CHARS = 50000 
-            if len(context_data) > MAX_CONTEXT_CHARS:
-                context_data = context_data[:MAX_CONTEXT_CHARS] + "\n... (context truncated due to size)"
-            context_prompt = f"CONTEXT: The user has pre-loaded the following data. Use this for analysis:\n{context_data}\n\n"
-            # del st.session_state.keepa_data #<-- This was the bug causing forgetfulness
+    with st.chat_message("user"):
+        for part in user_message_for_history:
+            if isinstance(part, str): st.markdown(part)
+            elif isinstance(part, dict) and "data" in part: st.image(part["data"])
 
-        final_prompt = [context_prompt] + user_message_for_api
-        
-        response = model.generate_content(final_prompt)
-        
-        if not response.candidates:
-             assistant_response = "I'm sorry, I couldn't generate a response. Please try again."
-        else:
-            candidate = response.candidates[0]
-            if not candidate.content.parts:
-                assistant_response = "I'm sorry, I received an empty response. Please try again."
-            else:
-                if candidate.content.parts[0].function_call:
-                    function_call = candidate.content.parts[0].function_call
-                    function_name = function_call.name
-                    
-                    if function_name == "google_web_search":
-                        function_args = {key: value for key, value in function_call.args.items()}
-                        tool_result = google_web_search(**function_args)
-                    elif function_name == "get_amazon_product_details":
-                        function_args = {key: value for key, value in function_call.args.items()}
-                        tool_result = get_amazon_product_details(**function_args)
-                    else:
-                        tool_result = f"Error: Unknown tool '{function_name}'"
-
-                    second_response = model.generate_content(
-                        final_prompt + [
-                            genai.protos.Part(function_call=function_call),
-                            genai.protos.Part(
-                                function_response=genai.protos.FunctionResponse(
-                                    name=function_name,
-                                    response={"result": tool_result},
-                                )
-                            ),
-                        ]
-                    )
-                    assistant_response = second_response.text
-                else:
-                    assistant_response = response.text
-
-        st.session_state.messages.append({"role": "assistant", "content": assistant_response})
-        st.rerun()
-
-    except Exception as e:
-        error_message = f"An unexpected error occurred with the AI model: {e}"
-        st.session_state.messages.append({"role": "assistant", "content": error_message})
-        st.rerun()
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            context_data = st.session_state.get('keepa_data')
+            assistant_response = llm_service.generate_response(user_message_for_api, context_data)
+            st.markdown(assistant_response)
+            st.session_state.messages.append({"role": "assistant", "content": assistant_response})
